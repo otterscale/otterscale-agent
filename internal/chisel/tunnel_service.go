@@ -137,7 +137,7 @@ func (s *TunnelService) registerClusterLocked(cluster string) error {
 
 	// Only allow the agent to open the specific reverse port on loopback.
 	// Chisel expects the authorized remote to match "R:host:port" (no local target part).
-	allowed := fmt.Sprintf("^R:127.0.0.1:%d$", tunnelPort)
+	allowed := allowedRemoteRegex(tunnelPort)
 
 	if err := s.server.AddUser(user, pass, allowed); err != nil {
 		return err
@@ -193,4 +193,8 @@ func randomCredentials() (string, string) {
 		return s, s
 	}
 	return s[:8], s[8:16]
+}
+
+func allowedRemoteRegex(tunnelPort int) string {
+	return fmt.Sprintf("^R:127.0.0.1:%d$", tunnelPort)
 }
