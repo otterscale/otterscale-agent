@@ -1,0 +1,58 @@
+package cmd
+
+import (
+	"context"
+	"log/slog"
+	"net"
+	"net/http"
+	"time"
+
+	"connectrpc.com/connect"
+	"github.com/rs/cors"
+)
+
+const (
+	containerEnvVar            = "OTTERSCALE_CONTAINER"
+	defaultContainerAddress    = ":8299"
+	defaultContainerConfigPath = "/etc/app/otterscale.yaml"
+)
+
+type handler interface {
+	ServeHTTP(http.ResponseWriter, *http.Request)
+	RegisterHandlers(opts []connect.HandlerOption) error
+}
+
+func startHTTPServer(ctx context.Context, address string, handler handler, opts ...connect.HandlerOption) error {
+	if err := handler.RegisterHandlers(opts); err != nil {
+		return err
+	}
+
+	protocols := new(http.Protocols)
+	protocols.SetHTTP1(true)
+	protocols.SetUnencryptedHTTP2(true)
+
+	srv := &http.Server{
+		Addr:              address,
+		Handler:           cors.AllowAll().Handler(handler),
+		ReadHeaderTimeout: time.Second,
+		ReadTimeout:       5 * time.Minute,
+		WriteTimeout:      5 * time.Minute,
+		MaxHeaderBytes:    8 * 1024, // 8KiB
+		Protocols:         protocols,
+	}
+
+	listener, err := net.Listen("tcp", address) //nolint:noctx // context not needed for Listen
+	if err != nil {
+		return err
+	}
+
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(shutdownCtx)
+	}()
+
+	slog.Info("Server starting on", "address", listener.Addr().String())
+	return srv.Serve(listener)
+}
