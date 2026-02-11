@@ -18,7 +18,7 @@ type handler interface {
 	RegisterHandlers(opts []connect.HandlerOption) error
 }
 
-func startHTTPServer(ctx context.Context, address string, handler handler, allowedOrigins []string, opts ...connect.HandlerOption) error {
+func startHTTPServer(ctx context.Context, handler handler, address string, allowedOrigins []string, opts ...connect.HandlerOption) error {
 	if err := handler.RegisterHandlers(opts); err != nil {
 		return err
 	}

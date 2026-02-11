@@ -185,27 +185,54 @@ func TestTunnelListPods(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// ---- 1. Start fake K8s API server ----
+	// ---- 1. Fake K8s API server ----
 	fakeK8s := newFakeK8sServer(t)
-	t.Logf("Fake K8s API server on %s", fakeK8s.URL)
 
-	// ---- 2. Build dependencies (same wiring as wire_gen.go) ----
-	t.Setenv("OTTERSCALE_TUNNEL_SERVER_KEY_SEED", "test-seed")
+	// ---- 2. Allocate ports ----
+	httpPort := freePort(t)
+	chiselPort := freePort(t)
+	tunnelPort := freePort(t)
 
-	conf := config.New()
+	httpAddr := fmt.Sprintf("127.0.0.1:%d", httpPort)
+	chiselAddr := fmt.Sprintf("127.0.0.1:%d", chiselPort)
+
+	// ---- 3. Environment variables ----
+	// All configuration is set via env vars so that both the server and agent
+	// commands read from the same source.
+	// (Viper reads env vars dynamically on each Get call, so vars set after
+	// config.New() — like the fingerprint below — are still picked up.)
+
+	// Server
+	t.Setenv("OTTERSCALE_SERVER_TUNNEL_KEY_SEED", "test-seed")
+	t.Setenv("OTTERSCALE_SERVER_ADDRESS", httpAddr)
+	t.Setenv("OTTERSCALE_SERVER_TUNNEL_ADDRESS", chiselAddr)
+	t.Setenv("OTTERSCALE_SERVER_DEBUG_ENABLED", "true")
+
+	// Agent
+	t.Setenv("OTTERSCALE_AGENT_CLUSTER", "test-cluster")
+	t.Setenv("OTTERSCALE_AGENT_TUNNEL_SERVER_URL", fmt.Sprintf("http://%s", chiselAddr))
+	t.Setenv("OTTERSCALE_AGENT_TUNNEL_AUTH", "agent:secret")
+	t.Setenv("OTTERSCALE_AGENT_TUNNEL_PORT", fmt.Sprintf("%d", tunnelPort))
+	t.Setenv("OTTERSCALE_AGENT_DEBUG_ENABLED", "true")
+	t.Setenv("OTTERSCALE_AGENT_DEBUG_KUBE_API_URL", fakeK8s.URL)
+
+	conf, err := config.New()
+	if err != nil {
+		t.Fatalf("config.New: %v", err)
+	}
+
+	// ---- 4. Dependencies (mirrors wire_gen.go) ----
 	tunnel, err := chisel.NewChiselService(conf)
 	if err != nil {
 		t.Fatalf("NewChiselService: %v", err)
 	}
 
-	// Register the test cluster before the server starts the tunnel listener.
-	// RegisterCluster adds the user to the chisel server and records the
-	// cluster -> tunnel port mapping used by GetTunnelAddress.
-	tunnelPort := freePort(t)
 	if err := tunnel.RegisterCluster("test-cluster", "agent", "secret", tunnelPort); err != nil {
 		t.Fatalf("RegisterCluster: %v", err)
 	}
-	t.Logf("Registered cluster 'test-cluster' with tunnel port %d", tunnelPort)
+
+	// Fingerprint is only available after the chisel server is created.
+	t.Setenv("OTTERSCALE_AGENT_TUNNEL_FINGERPRINT", tunnel.GetFingerprint())
 
 	k8s := kubernetes.New(tunnel)
 	discoveryClient := kubernetes.NewDiscoveryClient(k8s)
@@ -214,7 +241,10 @@ func TestTunnelListPods(t *testing.T) {
 	resourceService := app.NewResourceService(resourceUseCase)
 	hub := mux.NewHub(resourceService)
 
-	// ---- 3. Create and run the server command ----
+	// ---- 5. Start server ----
+	// debug=true bypasses the OIDC interceptor that requires a real Keycloak.
+	// The testAuthInterceptor is passed via extraInterceptors to inject
+	// identity.UserInfo into the request context (required by impersonationConfig).
 	authInterceptor := &testAuthInterceptor{
 		userInfo: identity.UserInfo{
 			Subject: "test-user",
@@ -222,50 +252,59 @@ func TestTunnelListPods(t *testing.T) {
 		},
 	}
 
-	serverAddr := fmt.Sprintf("127.0.0.1:%d", freePort(t))
-	tunnelAddr := fmt.Sprintf("127.0.0.1:%d", freePort(t))
+	serverCmd, err := cmd.NewServer(conf, hub, tunnel, authInterceptor)
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	serverCmd.SetArgs([]string{}) // all config comes from env vars
 
-	serverCmd := cmd.NewServer(conf, hub, tunnel, cmd.WithInterceptors(authInterceptor))
-	serverCmd.SetArgs([]string{
-		"--address", serverAddr,
-		"--tunnel-address", tunnelAddr,
+	serverDone := make(chan error, 1)
+	go func() {
+		serverDone <- serverCmd.ExecuteContext(ctx)
+	}()
+	t.Cleanup(func() {
+		select {
+		case err := <-serverDone:
+			if err != nil {
+				t.Logf("Server exited with: %v", err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Log("Server did not exit within 5s (non-fatal)")
+		}
 	})
 
-	serverErrCh := make(chan error, 1)
+	waitForPort(t, httpAddr, 5*time.Second)
+	waitForPort(t, chiselAddr, 5*time.Second)
+
+	// ---- 6. Start agent ----
+	agentCmd, err := cmd.NewAgent(conf)
+	if err != nil {
+		t.Fatalf("NewAgent: %v", err)
+	}
+	agentCmd.SetArgs([]string{}) // all config comes from env vars
+
+	agentDone := make(chan error, 1)
 	go func() {
-		serverErrCh <- serverCmd.ExecuteContext(ctx)
+		agentDone <- agentCmd.ExecuteContext(ctx)
 	}()
-
-	// Wait for both the HTTP server and the tunnel server to be accepting connections.
-	waitForPort(t, serverAddr, 5*time.Second)
-	waitForPort(t, tunnelAddr, 5*time.Second)
-	t.Logf("Server ready: HTTP on %s, tunnel on %s", serverAddr, tunnelAddr)
-
-	// ---- 4. Create and run the agent command ----
-	fingerprint := tunnel.GetFingerprint()
-
-	agentCmd := cmd.NewAgent()
-	agentCmd.SetArgs([]string{
-		"--cluster", "test-cluster",
-		"--server", fmt.Sprintf("http://%s", tunnelAddr),
-		"--auth", "agent:secret",
-		"--fingerprint", fingerprint,
-		"--tunnel-port", fmt.Sprintf("%d", tunnelPort),
-		"--kube-api-url", fakeK8s.URL,
+	t.Cleanup(func() {
+		select {
+		case err := <-agentDone:
+			if err != nil {
+				t.Logf("Agent exited with: %v", err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Log("Agent did not exit within 5s (non-fatal)")
+		}
 	})
 
-	agentErrCh := make(chan error, 1)
-	go func() {
-		agentErrCh <- agentCmd.ExecuteContext(ctx)
-	}()
-
-	// Wait for the reverse tunnel to be ready (the agent binds tunnelPort on
-	// the server side through chisel).
 	waitForPort(t, fmt.Sprintf("127.0.0.1:%d", tunnelPort), 5*time.Second)
-	t.Log("Agent connected, reverse tunnel is ready")
 
-	// ---- 5. Create Connect RPC client and call List ----
-	client := pbconnect.NewResourceServiceClient(http.DefaultClient, fmt.Sprintf("http://%s", serverAddr))
+	// ---- 7. RPC call ----
+	client := pbconnect.NewResourceServiceClient(
+		http.DefaultClient,
+		fmt.Sprintf("http://%s", httpAddr),
+	)
 
 	listReq := &pb.ListRequest{}
 	listReq.SetCluster("test-cluster")
@@ -276,10 +315,10 @@ func TestTunnelListPods(t *testing.T) {
 
 	listResp, err := client.List(ctx, listReq)
 	if err != nil {
-		t.Fatalf("List failed: %v", err)
+		t.Fatalf("List RPC failed: %v", err)
 	}
 
-	// ---- 6. Assertions ----
+	// ---- 8. Assertions ----
 	items := listResp.GetItems()
 	if len(items) != 1 {
 		t.Fatalf("expected 1 item, got %d", len(items))
@@ -316,26 +355,5 @@ func TestTunnelListPods(t *testing.T) {
 		t.Errorf("expected resourceVersion containing '1000', got %q", rv)
 	}
 
-	t.Log("All assertions passed: client -> server cmd -> tunnel -> agent cmd -> fake K8s -> response verified")
-
-	// ---- 7. Shutdown ----
-	cancel()
-
-	select {
-	case err := <-serverErrCh:
-		if err != nil {
-			t.Logf("Server exited with: %v", err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Log("Server did not exit within 5s (non-fatal)")
-	}
-
-	select {
-	case err := <-agentErrCh:
-		if err != nil {
-			t.Logf("Agent exited with: %v", err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Log("Agent did not exit within 5s (non-fatal)")
-	}
+	t.Log("All assertions passed: client -> server -> tunnel -> agent -> fake K8s -> response verified")
 }

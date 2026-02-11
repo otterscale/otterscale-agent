@@ -16,24 +16,31 @@ import (
 )
 
 type Interceptor struct {
-	verifier *oidc.IDTokenVerifier
+	*oidc.IDTokenVerifier
 }
 
 func NewInterceptor(conf *config.Config) (*Interceptor, error) {
+	var (
+		issuer   = conf.ServerKeycloakRealmURL()
+		clientID = conf.ServerKeycloakClientID()
+	)
+
 	const timeout = 30 * time.Second
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	provider, err := oidc.NewProvider(ctx, conf.KeycloakRealmURL())
+	provider, err := oidc.NewProvider(ctx, issuer)
 	if err != nil {
 		return nil, fmt.Errorf("failed to init oidc provider: %w", err)
 	}
 
+	verifier := provider.Verifier(&oidc.Config{
+		ClientID: clientID,
+	})
+
 	return &Interceptor{
-		verifier: provider.Verifier(&oidc.Config{
-			ClientID: conf.KeycloakClientID(),
-		}),
+		IDTokenVerifier: verifier,
 	}, nil
 }
 
@@ -67,7 +74,7 @@ func (i *Interceptor) enrichContextWithSubject(ctx context.Context, h http.Heade
 		return nil, connect.NewError(connect.CodeUnauthenticated, err)
 	}
 
-	idToken, err := i.verifier.Verify(ctx, token)
+	idToken, err := i.Verify(ctx, token)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("invalid token"))
 	}

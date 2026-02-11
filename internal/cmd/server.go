@@ -13,43 +13,25 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// ServerOption configures optional behaviour for the server command.
-type ServerOption func(*serverConfig)
-
-type serverConfig struct {
-	interceptors []connect.Interceptor
-}
-
-// WithInterceptors overrides the default interceptors (OpenTelemetry + OIDC
-// impersonation). This is primarily useful for integration tests that need to
-// replace the Keycloak OIDC interceptor with a test-only variant.
-func WithInterceptors(interceptors ...connect.Interceptor) ServerOption {
-	return func(c *serverConfig) {
-		c.interceptors = interceptors
-	}
-}
-
 // TODO: replicated server
-func NewServer(conf *config.Config, hub *mux.Hub, tunnel core.TunnelProvider, opts ...ServerOption) *cobra.Command {
-	var address, tunnelAddress string
-
-	var sc serverConfig
-	for _, o := range opts {
-		o(&sc)
-	}
-
+func NewServer(conf *config.Config, hub *mux.Hub, tunnel core.TunnelProvider, interceptors ...connect.Interceptor) (*cobra.Command, error) {
 	cmd := &cobra.Command{
 		Use:     "server",
 		Short:   "Start server that provides gRPC and HTTP endpoints for the core services",
 		Example: "otterscale server --address=:8299 --tunnel-address=127.0.0.1:16598",
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			var (
+				address        = conf.ServerAddress()
+				allowedOrigins = conf.ServerAllowedOrigins()
+				tunnelAddress  = conf.ServerTunnelAddress()
+			)
+
 			slog.Info("Starting tunnel server", "address", tunnelAddress)
 			if err := tunnel.Start(tunnelAddress); err != nil {
 				return fmt.Errorf("failed to start tunnel server: %w", err)
 			}
 
-			interceptors := sc.interceptors
-			if interceptors == nil {
+			if !conf.ServerDebugEnabled() {
 				openTelemetryInterceptor, err := otelconnect.NewInterceptor()
 				if err != nil {
 					return err
@@ -60,27 +42,17 @@ func NewServer(conf *config.Config, hub *mux.Hub, tunnel core.TunnelProvider, op
 					return err
 				}
 
-				interceptors = []connect.Interceptor{openTelemetryInterceptor, impersonationInterceptor}
+				interceptors = append(interceptors, openTelemetryInterceptor, impersonationInterceptor)
 			}
 
-			slog.Info("Starting HTTP server", "address", address)
-			return startHTTPServer(cmd.Context(), address, hub, conf.CORSAllowedOrigins(), connect.WithInterceptors(interceptors...))
+			slog.Info("Starting HTTP server", "address", address, "allowedOrigins", allowedOrigins)
+			return startHTTPServer(cmd.Context(), hub, address, allowedOrigins, connect.WithInterceptors(interceptors...))
 		},
 	}
 
-	cmd.Flags().StringVar(
-		&address,
-		"address",
-		":8299",
-		"Address for server to listen on (e.g. :8299)",
-	)
+	if err := conf.BindFlags(cmd.Flags(), config.ServerOptions); err != nil {
+		return nil, err
+	}
 
-	cmd.Flags().StringVar(
-		&tunnelAddress,
-		"tunnel-address",
-		"127.0.0.1:16598",
-		"Address for tunnel server to listen on (e.g. 127.0.0.1:16598)",
-	)
-
-	return cmd
+	return cmd, nil
 }

@@ -17,9 +17,11 @@ type chiselService struct {
 }
 
 func NewChiselService(conf *config.Config) (core.TunnelProvider, error) {
+	keySeed := conf.ServerTunnelKeySeed()
+
 	cfg := &chserver.Config{
 		Reverse: true,
-		KeySeed: conf.TunnelServerKeySeed(),
+		KeySeed: keySeed,
 	}
 
 	chServer, err := chserver.NewServer(cfg)

@@ -45,7 +45,7 @@ func run(ctx context.Context) error {
 }
 
 // newCmd is a Wire provider responsible for constructing the Root Command.
-func newCmd(conf *config.Config, hub *mux.Hub, tunnel core.TunnelProvider) *cobra.Command {
+func newCmd(conf *config.Config, hub *mux.Hub, tunnel core.TunnelProvider) (*cobra.Command, error) {
 	c := &cobra.Command{
 		Use:           "otterscale",
 		Short:         "OtterScale: A unified platform for simplified compute, storage, and networking.",
@@ -54,10 +54,17 @@ func newCmd(conf *config.Config, hub *mux.Hub, tunnel core.TunnelProvider) *cobr
 		SilenceErrors: true, // Silence errors here so we can handle printing centrally in main.
 	}
 
-	c.AddCommand(
-		cmd.NewServer(conf, hub, tunnel),
-		cmd.NewAgent(),
-	)
+	serverCmd, err := cmd.NewServer(conf, hub, tunnel)
+	if err != nil {
+		return nil, err
+	}
 
-	return c
+	agentCmd, err := cmd.NewAgent(conf)
+	if err != nil {
+		return nil, err
+	}
+
+	c.AddCommand(serverCmd, agentCmd)
+
+	return c, nil
 }

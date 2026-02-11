@@ -19,7 +19,10 @@ import (
 // Injectors from wire.go:
 
 func wireCmd() (*cobra.Command, func(), error) {
-	configConfig := config.New()
+	configConfig, err := config.New()
+	if err != nil {
+		return nil, nil, err
+	}
 	tunnelProvider, err := chisel.NewChiselService(configConfig)
 	if err != nil {
 		return nil, nil, err
@@ -30,7 +33,10 @@ func wireCmd() (*cobra.Command, func(), error) {
 	resourceUseCase := core.NewResourceUseCase(discoveryClient, resourceRepo)
 	resourceService := app.NewResourceService(resourceUseCase)
 	hub := mux.NewHub(resourceService)
-	command := newCmd(configConfig, hub, tunnelProvider)
+	command, err := newCmd(configConfig, hub, tunnelProvider)
+	if err != nil {
+		return nil, nil, err
+	}
 	return command, func() {
 	}, nil
 }

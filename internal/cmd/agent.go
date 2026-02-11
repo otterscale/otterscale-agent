@@ -9,69 +9,45 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
-	"time"
 
 	chclient "github.com/jpillora/chisel/client"
+	"github.com/otterscale/otterscale-agent/internal/config"
 	"github.com/spf13/cobra"
 	"k8s.io/client-go/rest"
 )
 
-// AgentConfig holds the configuration parameters required to run the agent.
-type AgentConfig struct {
-	Cluster     string
-	Server      string
-	Auth        string
-	Fingerprint string
-	TunnelPort  int
-	Timeout     time.Duration
-	KubeAPIURL  string // Optional: override the in-cluster K8s API URL (for testing).
-}
-
-// Validate checks if the required parameters are present.
-func (c *AgentConfig) Validate() error {
-	if c.Cluster == "" || c.Server == "" || c.Auth == "" || c.Fingerprint == "" {
-		return fmt.Errorf("missing required flags: cluster, server, auth, and fingerprint")
-	}
-	if c.TunnelPort == 0 {
-		return fmt.Errorf("tunnel-port is required")
-	}
-	return nil
-}
-
-func NewAgent() *cobra.Command {
-	cfg := &AgentConfig{}
-
+// TODO: refactor to domain-driven architecture
+func NewAgent(conf *config.Config) (*cobra.Command, error) {
 	cmd := &cobra.Command{
 		Use:     "agent",
 		Short:   "Start agent that connects to server and executes requests in-cluster",
-		Example: "otterscale agent --cluster=dev --server=https://server.otterscale.io --auth=user:pass --fingerprint=... --tunnel-port=16598",
+		Example: "otterscale agent --cluster=default --tunnel-server-url=https://server.otterscale.io --tunnel-auth=user:pass --tunnel-fingerprint=... --tunnel-port=16598",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if err := cfg.Validate(); err != nil {
-				return err
-			}
-			return runAgent(cmd.Context(), cfg)
+			return runAgent(cmd.Context(), conf)
 		},
 	}
 
-	f := cmd.Flags()
-	f.StringVar(&cfg.Cluster, "cluster", "", "Cluster name (e.g. dev)")
-	f.StringVar(&cfg.Server, "server", "", "Server URL (e.g. https://server.otterscale.io)")
-	f.StringVar(&cfg.Auth, "auth", "", "Basic auth (user:pass)")
-	f.StringVar(&cfg.Fingerprint, "fingerprint", "", "Server SSH fingerprint")
-	f.IntVar(&cfg.TunnelPort, "tunnel-port", 0, "The dedicated remote port on server for this cluster (e.g. 16598)")
-	f.DurationVar(&cfg.Timeout, "timeout", 30*time.Second, "Connection timeout")
-	f.StringVar(&cfg.KubeAPIURL, "kube-api-url", "", "Override in-cluster K8s API server URL (for testing)")
+	if err := conf.BindFlags(cmd.Flags(), config.AgentOptions); err != nil {
+		return nil, err
+	}
 
-	return cmd
+	return cmd, nil
 }
 
 // runAgent contains the main execution logic for the agent.
-func runAgent(ctx context.Context, cfg *AgentConfig) error {
+func runAgent(ctx context.Context, conf *config.Config) error {
+	var (
+		debugEnabled = conf.AgentDebugEnabled()
+		kubeAPIURL   = conf.AgentDebugKubeAPIURL()
+		serverURL    = conf.AgentTunnelServerURL()
+		tunnelPort   = conf.AgentTunnelPort()
+	)
+
 	// 1. Prepare the reverse proxy for the Kubernetes API Server.
 	var k8sProxy *httputil.ReverseProxy
 	var err error
-	if cfg.KubeAPIURL != "" {
-		k8sProxy, err = newKubeAPIProxyFromURL(cfg.KubeAPIURL)
+	if debugEnabled {
+		k8sProxy, err = newKubeAPIProxyFromURL(kubeAPIURL)
 	} else {
 		k8sProxy, err = newKubeAPIProxy()
 	}
@@ -87,7 +63,7 @@ func runAgent(ctx context.Context, cfg *AgentConfig) error {
 	localProxyPort := listener.Addr().(*net.TCPAddr).Port
 
 	// 3. Prepare the Chisel Reverse Tunnel Client.
-	tunnelClient, err := newTunnelClient(cfg, localProxyPort)
+	tunnelClient, err := newTunnelClient(conf, localProxyPort)
 	if err != nil {
 		return fmt.Errorf("failed to create tunnel client: %w", err)
 	}
@@ -106,7 +82,7 @@ func runAgent(ctx context.Context, cfg *AgentConfig) error {
 
 	// Goroutine: Run the Chisel Agent connection.
 	go func() {
-		slog.Info("Agent connecting to server", "server", cfg.Server, "tunnelPort", cfg.TunnelPort)
+		slog.Info("Agent connecting to server", "server", serverURL, "tunnelPort", tunnelPort)
 		if err := tunnelClient.Start(ctx); err != nil {
 			errChan <- fmt.Errorf("agent failed to start: %w", err)
 			return
@@ -129,26 +105,35 @@ func runAgent(ctx context.Context, cfg *AgentConfig) error {
 }
 
 // newTunnelClient creates a Chisel Client instance.
-func newTunnelClient(cfg *AgentConfig, localPort int) (*chclient.Client, error) {
+func newTunnelClient(conf *config.Config, localPort int) (*chclient.Client, error) {
+	var (
+		cluster     = conf.AgentCluster()
+		serverURL   = conf.AgentTunnelServerURL()
+		auth        = conf.AgentTunnelAuth()
+		fingerprint = conf.AgentTunnelFingerprint()
+		tunnelPort  = conf.AgentTunnelPort()
+		timeout     = conf.AgentTunnelTimeout()
+	)
+
 	hostname, err := os.Hostname()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get hostname: %w", err)
 	}
 
 	headers := http.Header{}
-	headers.Set("X-Cluster", cfg.Cluster)
+	headers.Set("X-Cluster", cluster)
 	headers.Set("X-Agent-ID", hostname) // Usually the Pod Name
 
 	chiselConfig := &chclient.Config{
-		Server:      cfg.Server,
-		Auth:        cfg.Auth,
-		Fingerprint: cfg.Fingerprint,
+		Server:      serverURL,
+		Auth:        auth,
+		Fingerprint: fingerprint,
 		Headers:     headers,
 		Remotes: []string{
 			// Forward traffic from the remote TunnelPort to the local port.
-			fmt.Sprintf("R:127.0.0.1:%d:127.0.0.1:%d", cfg.TunnelPort, localPort),
+			fmt.Sprintf("R:127.0.0.1:%d:127.0.0.1:%d", tunnelPort, localPort),
 		},
-		KeepAlive:     cfg.Timeout,
+		KeepAlive:     timeout,
 		MaxRetryCount: -1, // Infinite retries
 	}
 
