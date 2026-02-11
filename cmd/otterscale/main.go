@@ -6,16 +6,15 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/otterscale/otterscale-agent/internal/chisel"
 	"github.com/otterscale/otterscale-agent/internal/cmd"
 	"github.com/otterscale/otterscale-agent/internal/config"
-	"github.com/otterscale/otterscale-agent/internal/leader"
+	"github.com/otterscale/otterscale-agent/internal/core"
 	"github.com/otterscale/otterscale-agent/internal/mux"
 )
 
 var version = "devel"
 
-func newCmd(conf *config.Config, hub *mux.Hub, spoke *mux.Spoke, tunnels *chisel.TunnelService, elector *leader.Elector) *cobra.Command {
+func newCmd(conf *config.Config, hub *mux.Hub, tunnel core.TunnelProvider) *cobra.Command {
 	c := &cobra.Command{
 		Use:           "otterscale",
 		Short:         "OtterScale: A unified platform for simplified compute, storage, and networking.",
@@ -24,18 +23,15 @@ func newCmd(conf *config.Config, hub *mux.Hub, spoke *mux.Spoke, tunnels *chisel
 		SilenceErrors: true,
 	}
 	c.AddCommand(
-		cmd.NewServer(conf, hub, tunnels, elector),
-		cmd.NewAgent(conf, spoke),
+		cmd.NewServer(conf, hub, tunnel),
+		cmd.NewAgent(),
 	)
 	return c
 }
 
 func run() error {
-	// options
-	grpcHelper := true
-
 	// wire cmd
-	cmd, cleanup, err := wireCmd(grpcHelper)
+	cmd, cleanup, err := wireCmd()
 	if err != nil {
 		return err
 	}

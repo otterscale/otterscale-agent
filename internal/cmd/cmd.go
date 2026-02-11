@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"log/slog"
 	"net"
 	"net/http"
@@ -11,18 +10,12 @@ import (
 	"github.com/rs/cors"
 )
 
-const (
-	containerEnvVar            = "OTTERSCALE_CONTAINER"
-	defaultContainerAddress    = ":8299"
-	defaultContainerConfigPath = "/etc/app/otterscale.yaml"
-)
-
 type handler interface {
 	ServeHTTP(http.ResponseWriter, *http.Request)
 	RegisterHandlers(opts []connect.HandlerOption) error
 }
 
-func startHTTPServer(ctx context.Context, address string, handler handler, opts ...connect.HandlerOption) error {
+func startHTTPServer(address string, handler handler, opts ...connect.HandlerOption) error {
 	if err := handler.RegisterHandlers(opts); err != nil {
 		return err
 	}
@@ -45,13 +38,6 @@ func startHTTPServer(ctx context.Context, address string, handler handler, opts 
 	if err != nil {
 		return err
 	}
-
-	go func() {
-		<-ctx.Done()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		_ = srv.Shutdown(shutdownCtx)
-	}()
 
 	slog.Info("Server starting on", "address", listener.Addr().String())
 	return srv.Serve(listener)

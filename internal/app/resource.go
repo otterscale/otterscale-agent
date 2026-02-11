@@ -35,8 +35,8 @@ func NewResourceService(resource *core.ResourceUseCase) *ResourceService {
 
 var _ pbconnect.ResourceServiceHandler = (*ResourceService)(nil)
 
-func (s *ResourceService) Discovery(_ context.Context, req *pb.DiscoveryRequest) (*pb.DiscoveryResponse, error) {
-	apiResources, err := s.resource.ListAPIResources(req.GetCluster())
+func (s *ResourceService) Discovery(ctx context.Context, req *pb.DiscoveryRequest) (*pb.DiscoveryResponse, error) {
+	apiResources, err := s.resource.GetServerResources(ctx, req.GetCluster())
 	if err != nil {
 		return nil, k8sErrorToConnectError(err)
 	}
@@ -51,22 +51,16 @@ func (s *ResourceService) Discovery(_ context.Context, req *pb.DiscoveryRequest)
 	return resp, nil
 }
 
-func (s *ResourceService) Schema(_ context.Context, req *pb.SchemaRequest) (*structpb.Struct, error) {
-	schema, err := s.resource.GetSchema(req.GetCluster(), req.GetGroup(), req.GetVersion(), req.GetKind())
+func (s *ResourceService) Schema(ctx context.Context, req *pb.SchemaRequest) (*structpb.Struct, error) {
+	schema, err := s.resource.ResolveSchema(ctx, req.GetCluster(), req.GetGroup(), req.GetVersion(), req.GetKind())
 	if err != nil {
 		return nil, k8sErrorToConnectError(err)
 	}
-
 	return s.toProtoStructFromJSONSchema(schema)
 }
 
 func (s *ResourceService) List(ctx context.Context, req *pb.ListRequest) (*pb.ListResponse, error) {
-	cgvr, err := s.resource.Validate(req.GetCluster(), req.GetGroup(), req.GetVersion(), req.GetResource())
-	if err != nil {
-		return nil, k8sErrorToConnectError(err)
-	}
-
-	resources, err := s.resource.ListResources(ctx, cgvr, req.GetNamespace(), req.GetLabelSelector(), req.GetFieldSelector(), req.GetLimit(), req.GetContinue())
+	resources, err := s.resource.ListResources(ctx, req.GetCluster(), req.GetGroup(), req.GetVersion(), req.GetResource(), req.GetNamespace(), req.GetLabelSelector(), req.GetFieldSelector(), req.GetLimit(), req.GetContinue())
 	if err != nil {
 		return nil, k8sErrorToConnectError(err)
 	}
@@ -85,67 +79,38 @@ func (s *ResourceService) List(ctx context.Context, req *pb.ListRequest) (*pb.Li
 }
 
 func (s *ResourceService) Get(ctx context.Context, req *pb.GetRequest) (*pb.Resource, error) {
-	cgvr, err := s.resource.Validate(req.GetCluster(), req.GetGroup(), req.GetVersion(), req.GetResource())
+	resource, err := s.resource.GetResource(ctx, req.GetCluster(), req.GetGroup(), req.GetVersion(), req.GetResource(), req.GetNamespace(), req.GetName())
 	if err != nil {
 		return nil, k8sErrorToConnectError(err)
 	}
-
-	resource, err := s.resource.GetResource(ctx, cgvr, req.GetNamespace(), req.GetName())
-	if err != nil {
-		return nil, k8sErrorToConnectError(err)
-	}
-
 	return s.toProtoResource(resource.Object)
 }
 
 func (s *ResourceService) Create(ctx context.Context, req *pb.CreateRequest) (*pb.Resource, error) {
-	cgvr, err := s.resource.Validate(req.GetCluster(), req.GetGroup(), req.GetVersion(), req.GetResource())
+	resource, err := s.resource.CreateResource(ctx, req.GetCluster(), req.GetGroup(), req.GetVersion(), req.GetResource(), req.GetNamespace(), req.GetManifest())
 	if err != nil {
 		return nil, k8sErrorToConnectError(err)
 	}
-
-	resource, err := s.resource.CreateResource(ctx, cgvr, req.GetNamespace(), req.GetManifest())
-	if err != nil {
-		return nil, k8sErrorToConnectError(err)
-	}
-
 	return s.toProtoResource(resource.Object)
 }
 
 func (s *ResourceService) Apply(ctx context.Context, req *pb.ApplyRequest) (*pb.Resource, error) {
-	cgvr, err := s.resource.Validate(req.GetCluster(), req.GetGroup(), req.GetVersion(), req.GetResource())
+	resource, err := s.resource.ApplyResource(ctx, req.GetCluster(), req.GetGroup(), req.GetVersion(), req.GetResource(), req.GetNamespace(), req.GetName(), req.GetManifest(), req.GetForce(), req.GetFieldManager())
 	if err != nil {
 		return nil, k8sErrorToConnectError(err)
 	}
-
-	resource, err := s.resource.ApplyResource(ctx, cgvr, req.GetNamespace(), req.GetName(), req.GetManifest(), req.GetForce(), req.GetFieldManager())
-	if err != nil {
-		return nil, k8sErrorToConnectError(err)
-	}
-
 	return s.toProtoResource(resource.Object)
 }
 
 func (s *ResourceService) Delete(ctx context.Context, req *pb.DeleteRequest) (*emptypb.Empty, error) {
-	cgvr, err := s.resource.Validate(req.GetCluster(), req.GetGroup(), req.GetVersion(), req.GetResource())
-	if err != nil {
+	if err := s.resource.DeleteResource(ctx, req.GetCluster(), req.GetGroup(), req.GetVersion(), req.GetResource(), req.GetNamespace(), req.GetName(), req.GetGracePeriodSeconds()); err != nil {
 		return nil, k8sErrorToConnectError(err)
 	}
-
-	if err := s.resource.DeleteResource(ctx, cgvr, req.GetNamespace(), req.GetName(), req.GetGracePeriodSeconds()); err != nil {
-		return nil, k8sErrorToConnectError(err)
-	}
-
 	return &emptypb.Empty{}, nil
 }
 
 func (s *ResourceService) Watch(ctx context.Context, req *pb.WatchRequest, stream *connect.ServerStream[pb.WatchEvent]) error {
-	cgvr, err := s.resource.Validate(req.GetCluster(), req.GetGroup(), req.GetVersion(), req.GetResource())
-	if err != nil {
-		return k8sErrorToConnectError(err)
-	}
-
-	watcher, err := s.resource.WatchResource(ctx, cgvr, req.GetNamespace(), req.GetLabelSelector(), req.GetFieldSelector(), req.GetResourceVersion())
+	watcher, err := s.resource.WatchResource(ctx, req.GetCluster(), req.GetGroup(), req.GetVersion(), req.GetResource(), req.GetNamespace(), req.GetLabelSelector(), req.GetFieldSelector(), req.GetResourceVersion())
 	if err != nil {
 		return k8sErrorToConnectError(err)
 	}

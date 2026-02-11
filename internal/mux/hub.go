@@ -13,22 +13,16 @@ import (
 	"go.opentelemetry.io/otel/sdk/metric"
 
 	resourcev1 "github.com/otterscale/otterscale-agent/api/resource/v1/pbconnect"
+	"github.com/otterscale/otterscale-agent/internal/app"
 )
-
-// HubResourceHandler is the ResourceService implementation used by the server hub.
-// We keep this as a distinct interface so wire can inject a proxy handler for server,
-// while agent can inject the real implementation into the spoke.
-type HubResourceHandler interface {
-	resourcev1.ResourceServiceHandler
-}
 
 type Hub struct {
 	*http.ServeMux
 
-	resource HubResourceHandler
+	resource *app.ResourceService
 }
 
-func NewHub(resource HubResourceHandler) *Hub {
+func NewHub(resource *app.ResourceService) *Hub {
 	return &Hub{
 		ServeMux: &http.ServeMux{},
 		resource: resource,

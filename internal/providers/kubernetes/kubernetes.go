@@ -7,34 +7,34 @@ import (
 	"k8s.io/client-go/rest"
 
 	"github.com/otterscale/otterscale-agent/internal/core"
-	"github.com/otterscale/otterscale-agent/internal/impersonation"
+	"github.com/otterscale/otterscale-agent/internal/identity"
 )
 
 type Kubernetes struct {
-	tunnel core.TunnelRepo
+	tunnel core.TunnelProvider
 }
 
-func New(tunnel core.TunnelRepo) *Kubernetes {
+func New(tunnel core.TunnelProvider) *Kubernetes {
 	return &Kubernetes{
 		tunnel: tunnel,
 	}
 }
 
 func (k *Kubernetes) impersonationConfig(ctx context.Context, cluster string) (*rest.Config, error) {
-	username, ok := impersonation.GetSubject(ctx)
+	user, ok := identity.GetUser(ctx)
 	if !ok {
 		return nil, fmt.Errorf("username not found in context")
 	}
 
 	impersonate := rest.ImpersonationConfig{
-		UserName: username,
+		UserName: user,
 		Groups:   []string{"system:authenticated"},
 	}
 
-	host, err := k.tunnel.GetHost(cluster)
+	address, err := k.tunnel.GetTunnelAddress(cluster)
 	if err != nil {
 		return nil, fmt.Errorf("tunnel unavailable: %w", err)
 	}
 
-	return &rest.Config{Host: host, Impersonate: impersonate}, nil
+	return &rest.Config{Host: address, Impersonate: impersonate}, nil
 }

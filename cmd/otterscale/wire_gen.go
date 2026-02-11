@@ -8,33 +8,29 @@ package main
 
 import (
 	"github.com/otterscale/otterscale-agent/internal/app"
-	"github.com/otterscale/otterscale-agent/internal/chisel"
 	"github.com/otterscale/otterscale-agent/internal/config"
 	"github.com/otterscale/otterscale-agent/internal/core"
-	"github.com/otterscale/otterscale-agent/internal/kubernetes"
-	"github.com/otterscale/otterscale-agent/internal/leader"
 	"github.com/otterscale/otterscale-agent/internal/mux"
+	"github.com/otterscale/otterscale-agent/internal/providers/chisel"
+	"github.com/otterscale/otterscale-agent/internal/providers/kubernetes"
 	"github.com/spf13/cobra"
 )
 
 // Injectors from wire.go:
 
-func wireCmd(bool2 bool) (*cobra.Command, func(), error) {
+func wireCmd() (*cobra.Command, func(), error) {
 	configConfig := config.New()
-	tunnelService := chisel.NewTunnelService(configConfig)
-	elector, err := leader.ProvideElector()
+	tunnelProvider, err := chisel.NewChiselService(configConfig)
 	if err != nil {
 		return nil, nil, err
 	}
-	resourceProxy := app.NewResourceProxy(configConfig, tunnelService, elector)
-	hub := mux.NewHub(resourceProxy)
-	kubernetesKubernetes := kubernetes.New(configConfig)
-	discoveryRepo := kubernetes.NewDiscoveryRepo(kubernetesKubernetes)
+	kubernetesKubernetes := kubernetes.New(tunnelProvider)
+	discoveryClient := kubernetes.NewDiscoveryClient(kubernetesKubernetes)
 	resourceRepo := kubernetes.NewResourceRepo(kubernetesKubernetes)
-	resourceUseCase := core.NewResourceUseCase(discoveryRepo, resourceRepo)
+	resourceUseCase := core.NewResourceUseCase(discoveryClient, resourceRepo)
 	resourceService := app.NewResourceService(resourceUseCase)
-	spoke := mux.NewSpoke(resourceService)
-	command := newCmd(configConfig, hub, spoke, tunnelService, elector)
+	hub := mux.NewHub(resourceService)
+	command := newCmd(configConfig, hub, tunnelProvider)
 	return command, func() {
 	}, nil
 }

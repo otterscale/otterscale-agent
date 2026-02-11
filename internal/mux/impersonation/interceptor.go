@@ -12,6 +12,7 @@ import (
 	"github.com/coreos/go-oidc/v3/oidc"
 
 	"github.com/otterscale/otterscale-agent/internal/config"
+	"github.com/otterscale/otterscale-agent/internal/identity"
 )
 
 type Interceptor struct {
@@ -71,7 +72,7 @@ func (i *Interceptor) enrichContextWithSubject(ctx context.Context, h http.Heade
 		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("invalid token"))
 	}
 
-	return context.WithValue(ctx, subjectKey, idToken.Subject), nil
+	return identity.WithUser(ctx, idToken.Subject), nil
 }
 
 func extractToken(h http.Header) (string, error) {

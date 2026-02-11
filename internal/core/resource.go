@@ -11,45 +11,49 @@ import (
 	"golang.org/x/sync/singleflight"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/runtime/serializer/yaml"
+	"k8s.io/apimachinery/pkg/version"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/kube-openapi/pkg/validation/spec"
 )
 
-//nolint:revive // allows this exported struct name.
+type DiscoveryClient interface {
+	LookupResource(ctx context.Context, cluster, group, version, resource string) (schema.GroupVersionResource, error)
+	GetServerResources(ctx context.Context, cluster string) ([]*metav1.APIResourceList, error)
+	ResolveSchema(ctx context.Context, cluster, group, version, kind string) (*spec.Schema, error)
+	GetServerVersion(ctx context.Context, cluster string) (*version.Info, error)
+}
+
 type ResourceRepo interface {
-	List(ctx context.Context, cgvr ClusterGroupVersionResource, namespace, labelSelector, fieldSelector string, limit int64, continueToken string) (*unstructured.UnstructuredList, error)
-	Get(ctx context.Context, cgvr ClusterGroupVersionResource, namespace, name string) (*unstructured.Unstructured, error)
-	Create(ctx context.Context, cgvr ClusterGroupVersionResource, namespace string, obj *unstructured.Unstructured) (*unstructured.Unstructured, error)
-	Apply(ctx context.Context, cgvr ClusterGroupVersionResource, namespace, name string, data []byte, force bool, fieldManager string) (*unstructured.Unstructured, error)
-	Delete(ctx context.Context, cgvr ClusterGroupVersionResource, namespace, name string, gracePeriodSeconds *int64) error
-	Watch(ctx context.Context, cgvr ClusterGroupVersionResource, namespace, labelSelector, fieldSelector, resourceVersion string, sendInitialEvents bool) (watch.Interface, error)
+	List(ctx context.Context, cluster string, gvr schema.GroupVersionResource, namespace, labelSelector, fieldSelector string, limit int64, continueToken string) (*unstructured.UnstructuredList, error)
+	Get(ctx context.Context, cluster string, gvr schema.GroupVersionResource, namespace, name string) (*unstructured.Unstructured, error)
+	Create(ctx context.Context, cluster string, gvr schema.GroupVersionResource, namespace string, obj *unstructured.Unstructured) (*unstructured.Unstructured, error)
+	Apply(ctx context.Context, cluster string, gvr schema.GroupVersionResource, namespace, name string, data []byte, force bool, fieldManager string) (*unstructured.Unstructured, error)
+	Delete(ctx context.Context, cluster string, gvr schema.GroupVersionResource, namespace, name string, gracePeriodSeconds *int64) error
+	Watch(ctx context.Context, cluster string, gvr schema.GroupVersionResource, namespace, labelSelector, fieldSelector, resourceVersion string, sendInitialEvents bool) (watch.Interface, error)
 }
 
 type ResourceUseCase struct {
-	discovery DiscoveryRepo
+	discovery DiscoveryClient
 	resource  ResourceRepo
 
 	schemaCache   sync.Map
 	schemaFlights singleflight.Group
 }
 
-func NewResourceUseCase(discovery DiscoveryRepo, resource ResourceRepo) *ResourceUseCase {
+func NewResourceUseCase(discovery DiscoveryClient, resource ResourceRepo) *ResourceUseCase {
 	return &ResourceUseCase{
 		discovery: discovery,
 		resource:  resource,
 	}
 }
 
-func (uc *ResourceUseCase) Validate(cluster, group, version, resource string) (ClusterGroupVersionResource, error) {
-	return uc.discovery.Validate(cluster, group, version, resource)
+func (uc *ResourceUseCase) GetServerResources(ctx context.Context, cluster string) ([]*metav1.APIResourceList, error) {
+	return uc.discovery.GetServerResources(ctx, cluster)
 }
 
-func (uc *ResourceUseCase) ListAPIResources(cluster string) ([]*metav1.APIResourceList, error) {
-	return uc.discovery.List(cluster)
-}
-
-func (uc *ResourceUseCase) GetSchema(cluster, group, version, kind string) (*spec.Schema, error) {
+func (uc *ResourceUseCase) ResolveSchema(ctx context.Context, cluster, group, version, kind string) (*spec.Schema, error) {
 	key := uc.schemaCacheKey(cluster, group, version, kind)
 
 	if v, ok := uc.schemaCache.Load(key); ok {
@@ -57,7 +61,7 @@ func (uc *ResourceUseCase) GetSchema(cluster, group, version, kind string) (*spe
 	}
 
 	v, err, _ := uc.schemaFlights.Do(key, func() (any, error) {
-		schema, err := uc.discovery.Schema(cluster, group, version, kind)
+		schema, err := uc.discovery.ResolveSchema(ctx, cluster, group, version, kind)
 		if err != nil {
 			return nil, err
 		}
@@ -73,8 +77,13 @@ func (uc *ResourceUseCase) GetSchema(cluster, group, version, kind string) (*spe
 	return v.(*spec.Schema), nil
 }
 
-func (uc *ResourceUseCase) ListResources(ctx context.Context, cgvr ClusterGroupVersionResource, namespace, labelSelector, fieldSelector string, limit int64, continueToken string) (*unstructured.UnstructuredList, error) {
-	list, err := uc.resource.List(ctx, cgvr, namespace, labelSelector, fieldSelector, limit, continueToken)
+func (uc *ResourceUseCase) ListResources(ctx context.Context, cluster, group, version, resource, namespace, labelSelector, fieldSelector string, limit int64, continueToken string) (*unstructured.UnstructuredList, error) {
+	gvr, err := uc.discovery.LookupResource(ctx, cluster, group, version, resource)
+	if err != nil {
+		return nil, err
+	}
+
+	list, err := uc.resource.List(ctx, cluster, gvr, namespace, labelSelector, fieldSelector, limit, continueToken)
 	if err != nil {
 		return nil, err
 	}
@@ -86,20 +95,35 @@ func (uc *ResourceUseCase) ListResources(ctx context.Context, cgvr ClusterGroupV
 	return list, nil
 }
 
-func (uc *ResourceUseCase) GetResource(ctx context.Context, cgvr ClusterGroupVersionResource, namespace, name string) (*unstructured.Unstructured, error) {
-	return uc.resource.Get(ctx, cgvr, namespace, name)
+func (uc *ResourceUseCase) GetResource(ctx context.Context, cluster, group, version, resource, namespace, name string) (*unstructured.Unstructured, error) {
+	gvr, err := uc.discovery.LookupResource(ctx, cluster, group, version, resource)
+	if err != nil {
+		return nil, err
+	}
+
+	return uc.resource.Get(ctx, cluster, gvr, namespace, name)
 }
 
-func (uc *ResourceUseCase) CreateResource(ctx context.Context, cgvr ClusterGroupVersionResource, namespace string, manifest []byte) (*unstructured.Unstructured, error) {
+func (uc *ResourceUseCase) CreateResource(ctx context.Context, cluster, group, version, resource, namespace string, manifest []byte) (*unstructured.Unstructured, error) {
+	gvr, err := uc.discovery.LookupResource(ctx, cluster, group, version, resource)
+	if err != nil {
+		return nil, err
+	}
+
 	obj, err := uc.fromYAML(manifest)
 	if err != nil {
 		return nil, err
 	}
 
-	return uc.resource.Create(ctx, cgvr, namespace, obj)
+	return uc.resource.Create(ctx, cluster, gvr, namespace, obj)
 }
 
-func (uc *ResourceUseCase) ApplyResource(ctx context.Context, cgvr ClusterGroupVersionResource, namespace, name string, manifest []byte, force bool, fieldManager string) (*unstructured.Unstructured, error) {
+func (uc *ResourceUseCase) ApplyResource(ctx context.Context, cluster, group, version, resource, namespace, name string, manifest []byte, force bool, fieldManager string) (*unstructured.Unstructured, error) {
+	gvr, err := uc.discovery.LookupResource(ctx, cluster, group, version, resource)
+	if err != nil {
+		return nil, err
+	}
+
 	obj, err := uc.fromYAML(manifest)
 	if err != nil {
 		return nil, err
@@ -110,20 +134,34 @@ func (uc *ResourceUseCase) ApplyResource(ctx context.Context, cgvr ClusterGroupV
 		return nil, err
 	}
 
-	return uc.resource.Apply(ctx, cgvr, namespace, name, data, force, fieldManager)
+	return uc.resource.Apply(ctx, cluster, gvr, namespace, name, data, force, fieldManager)
 }
 
-func (uc *ResourceUseCase) DeleteResource(ctx context.Context, cgvr ClusterGroupVersionResource, namespace, name string, gracePeriodSeconds int64) error {
-	return uc.resource.Delete(ctx, cgvr, namespace, name, &gracePeriodSeconds)
+func (uc *ResourceUseCase) DeleteResource(ctx context.Context, cluster, group, version, resource, namespace, name string, gracePeriodSeconds int64) error {
+	gvr, err := uc.discovery.LookupResource(ctx, cluster, group, version, resource)
+	if err != nil {
+		return err
+	}
+
+	return uc.resource.Delete(ctx, cluster, gvr, namespace, name, &gracePeriodSeconds)
 }
 
-func (uc *ResourceUseCase) WatchResource(ctx context.Context, cgvr ClusterGroupVersionResource, namespace, labelSelector, fieldSelector, resourceVersion string) (watch.Interface, error) {
-	watchListFeature, err := uc.watchListFeature(cgvr.Cluster)
+func (uc *ResourceUseCase) WatchResource(ctx context.Context, cluster, group, version, resource, namespace, labelSelector, fieldSelector, resourceVersion string) (watch.Interface, error) {
+	gvr, err := uc.discovery.LookupResource(ctx, cluster, group, version, resource)
 	if err != nil {
 		return nil, err
 	}
 
-	return uc.resource.Watch(ctx, cgvr, namespace, labelSelector, fieldSelector, resourceVersion, watchListFeature)
+	watchListFeature, err := uc.watchListFeature(ctx, cluster)
+	if err != nil {
+		return nil, err
+	}
+
+	return uc.resource.Watch(ctx, cluster, gvr, namespace, labelSelector, fieldSelector, resourceVersion, watchListFeature)
+}
+
+func (uc *ResourceUseCase) schemaCacheKey(cluster, group, version, kind string) string {
+	return strings.Join([]string{cluster, group, version, kind}, "/")
 }
 
 func (uc *ResourceUseCase) fromYAML(manifest []byte) (*unstructured.Unstructured, error) {
@@ -154,8 +192,8 @@ func (uc *ResourceUseCase) cleanObject(obj *unstructured.Unstructured) {
 	}
 }
 
-func (uc *ResourceUseCase) watchListFeature(cluster string) (bool, error) {
-	version, err := uc.discovery.Version(cluster)
+func (uc *ResourceUseCase) watchListFeature(ctx context.Context, cluster string) (bool, error) {
+	version, err := uc.discovery.GetServerVersion(ctx, cluster)
 	if err != nil {
 		return false, err
 	}
@@ -173,8 +211,4 @@ func (uc *ResourceUseCase) watchListFeature(cluster string) (bool, error) {
 	}
 
 	return kubeVersion.GreaterThanEqual(watchListVersion), nil
-}
-
-func (uc *ResourceUseCase) schemaCacheKey(cluster, group, version, kind string) string {
-	return strings.Join([]string{cluster, group, version, kind}, "/")
 }

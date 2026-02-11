@@ -27,42 +27,7 @@ func NewDiscoveryClient(kubernetes *Kubernetes) core.DiscoveryClient {
 
 var _ core.DiscoveryClient = (*discoveryClient)(nil)
 
-func (d *discoveryClient) APIResources(ctx context.Context, cluster string) ([]*metav1.APIResourceList, error) {
-	client, err := d.client(ctx, cluster)
-	if err != nil {
-		return nil, err
-	}
-
-	_, resources, err := client.ServerGroupsAndResources()
-	return resources, err
-}
-
-func (d *discoveryClient) Schema(ctx context.Context, cluster, group, version, kind string) (*spec.Schema, error) {
-	client, err := d.client(ctx, cluster)
-	if err != nil {
-		return nil, err
-	}
-
-	resolver := &resolver.ClientDiscoveryResolver{
-		Discovery: client,
-	}
-	gvk := schema.GroupVersionKind{
-		Group:   group,
-		Version: version,
-		Kind:    kind,
-	}
-	return resolver.ResolveSchema(gvk)
-}
-
-func (d *discoveryClient) ServerVersion(ctx context.Context, cluster string) (*version.Info, error) {
-	client, err := d.client(ctx, cluster)
-	if err != nil {
-		return nil, err
-	}
-	return client.ServerVersion()
-}
-
-func (d *discoveryClient) ValidateResource(ctx context.Context, cluster, group, version, resource string) (schema.GroupVersionResource, error) {
+func (d *discoveryClient) LookupResource(ctx context.Context, cluster, group, version, resource string) (schema.GroupVersionResource, error) {
 	client, err := d.client(ctx, cluster)
 	if err != nil {
 		return schema.GroupVersionResource{}, err
@@ -85,6 +50,41 @@ func (d *discoveryClient) ValidateResource(ctx context.Context, cluster, group, 
 		}
 	}
 	return schema.GroupVersionResource{}, apierrors.NewBadRequest(fmt.Sprintf("unable to recognize resource %s", gvr))
+}
+
+func (d *discoveryClient) GetServerResources(ctx context.Context, cluster string) ([]*metav1.APIResourceList, error) {
+	client, err := d.client(ctx, cluster)
+	if err != nil {
+		return nil, err
+	}
+
+	_, resources, err := client.ServerGroupsAndResources()
+	return resources, err
+}
+
+func (d *discoveryClient) ResolveSchema(ctx context.Context, cluster, group, version, kind string) (*spec.Schema, error) {
+	client, err := d.client(ctx, cluster)
+	if err != nil {
+		return nil, err
+	}
+
+	resolver := &resolver.ClientDiscoveryResolver{
+		Discovery: client,
+	}
+	gvk := schema.GroupVersionKind{
+		Group:   group,
+		Version: version,
+		Kind:    kind,
+	}
+	return resolver.ResolveSchema(gvk)
+}
+
+func (d *discoveryClient) GetServerVersion(ctx context.Context, cluster string) (*version.Info, error) {
+	client, err := d.client(ctx, cluster)
+	if err != nil {
+		return nil, err
+	}
+	return client.ServerVersion()
 }
 
 func (d *discoveryClient) client(ctx context.Context, cluster string) (*discovery.DiscoveryClient, error) {
