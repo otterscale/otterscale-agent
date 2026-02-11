@@ -148,7 +148,8 @@ func newTunnelClient(cfg *AgentConfig, localPort int) (*chclient.Client, error) 
 }
 
 // newKubeAPIProxy creates a reverse proxy pointing to the in-cluster API Server.
-// It automatically injects the ServiceAccount Token.
+// It relies on rest.TransportFor to handle automatic token rotation from the
+// projected ServiceAccount token file, instead of injecting a static BearerToken.
 func newKubeAPIProxy() (*httputil.ReverseProxy, error) {
 	config, err := rest.InClusterConfig()
 	if err != nil {
@@ -160,21 +161,19 @@ func newKubeAPIProxy() (*httputil.ReverseProxy, error) {
 		return nil, fmt.Errorf("failed to parse k8s host URL: %w", err)
 	}
 
-	proxy := httputil.NewSingleHostReverseProxy(targetURL)
-
-	originalDirector := proxy.Director
-	proxy.Director = func(req *http.Request) {
-		originalDirector(req)
-		// Inject Bearer Token for authentication.
-		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", config.BearerToken))
-		// Modify Host Header to match the target API Server.
-		req.Host = targetURL.Host
-	}
-
-	// Use K8s Transport settings (handles TLS CA certificates, etc.).
+	// rest.TransportFor handles BearerTokenFile rotation + TLS automatically.
 	transport, err := rest.TransportFor(config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create rest transport: %w", err)
+	}
+
+	proxy := httputil.NewSingleHostReverseProxy(targetURL)
+	proxy.Director = func(req *http.Request) {
+		req.URL.Scheme = targetURL.Scheme
+		req.URL.Host = targetURL.Host
+		req.Host = targetURL.Host
+		// Do NOT set Authorization header: the transport's RoundTripper
+		// automatically injects the latest token from BearerTokenFile.
 	}
 	proxy.Transport = transport
 
