@@ -1,0 +1,36 @@
+edition = "2023";
+
+package otterscale.tunnel.v1;
+
+import "api/annotations.proto";
+
+option go_package = "github.com/otterscale/otterscale-agent/api/tunnel/v1;pb";
+
+// TunnelService manages the lifecycle of agent-to-server tunnel connections,
+// including registration and health checking.
+service TunnelService {
+  // Register allows an agent to register itself with the tunnel server.
+  // The agent sends its cluster identity and tunnel port; the server responds
+  // with its fingerprint so the agent can verify the tunnel connection.
+  // Authentication is provided via gRPC metadata (Basic Auth).
+  rpc Register(RegisterRequest) returns (RegisterResponse) {
+    option (otterscale.api.feature) = {
+      name: "tunnel-enabled"
+    };
+  };
+}
+
+// RegisterRequest contains the agent's cluster identity and tunnel port.
+message RegisterRequest {
+  // The cluster identifier this agent belongs to.
+  string cluster = 1;
+}
+
+// RegisterResponse contains the server's fingerprint for the agent to verify the connection.
+message RegisterResponse {
+  // The server's tunnel fingerprint, used by the agent to verify the connection.
+  string fingerprint = 1;
+
+  // The port on the server side that will be mapped to this agent's local proxy.
+  int32 tunnel_port = 2;
+}
