@@ -2887,7 +2887,7 @@ const file_api_resource_v1_resource_proto_rawDesc = "" +
 	"\x06Delete\x12%.otterscale.resource.v1.DeleteRequest\x1a\x16.google.protobuf.Empty\"\x17\x8a\xdf\xd5\x1d\x12\n" +
 	"\x10resource-enabled\x12l\n" +
 	"\x05Watch\x12$.otterscale.resource.v1.WatchRequest\x1a\".otterscale.resource.v1.WatchEvent\"\x17\x8a\xdf\xd5\x1d\x12\n" +
-	"\x10resource-enabled0\x01B;Z9github.com/otterscale/otterscale-agent/api/resource/v1;pbb\beditionsp\xe9\a"
+	"\x10resource-enabled0\x01B;Z9github.com/otterscale/otterscale-agent/api/resource/v1;pbb\beditionsp\xe8\a"
 
 var file_api_resource_v1_resource_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
 var file_api_resource_v1_resource_proto_msgTypes = make([]protoimpl.MessageInfo, 13)

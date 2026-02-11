@@ -222,17 +222,12 @@ func TestTunnelListPods(t *testing.T) {
 	}
 
 	// ---- 4. Dependencies (mirrors wire_gen.go) ----
+	// The agent will auto-register via POST /v1/register when it starts,
+	// so no manual RegisterCluster or fingerprint env var is needed.
 	tunnel, err := chisel.NewChiselService(conf)
 	if err != nil {
 		t.Fatalf("NewChiselService: %v", err)
 	}
-
-	if err := tunnel.RegisterCluster("test-cluster", "agent", "secret", tunnelPort); err != nil {
-		t.Fatalf("RegisterCluster: %v", err)
-	}
-
-	// Fingerprint is only available after the chisel server is created.
-	t.Setenv("OTTERSCALE_AGENT_TUNNEL_FINGERPRINT", tunnel.GetFingerprint())
 
 	k8s := kubernetes.New(tunnel)
 	discoveryClient := kubernetes.NewDiscoveryClient(k8s)
@@ -252,7 +247,9 @@ func TestTunnelListPods(t *testing.T) {
 		},
 	}
 
-	serverCmd, err := cmd.NewServer(conf, hub, tunnel, authInterceptor)
+	serverCmd, err := cmd.NewServer(conf, func() (*cmd.ServerDeps, func(), error) {
+		return cmd.NewServerDeps(hub, tunnel), func() {}, nil
+	}, authInterceptor)
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}

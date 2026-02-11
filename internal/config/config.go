@@ -42,7 +42,7 @@ const (
 var ServerOptions = []ConfigOption{
 	{Key: KeyServerAddress, Flag: flag(KeyServerAddress), Default: ":8299", Description: "Server listen address"},
 	{Key: KeyServerAllowedOrigins, Flag: flag(KeyServerAllowedOrigins), Default: []string{}, Description: "Server allowed origins"},
-	{Key: KeyServerTunnelAddress, Flag: flag(KeyServerTunnelAddress), Default: "127.0.0.1:16598", Description: "Server tunnel address"},
+	{Key: KeyServerTunnelAddress, Flag: flag(KeyServerTunnelAddress), Default: "127.0.0.1:8300", Description: "Server tunnel address"},
 	{Key: KeyServerTunnelKeySeed, Flag: flag(KeyServerTunnelKeySeed), Default: "change-me", Description: "Server tunnel key seed"},
 	{Key: KeyServerKeycloakRealmURL, Flag: flag(KeyServerKeycloakRealmURL), Default: "https://keycloak.example.com/realms/otterscale", Description: "Server keycloak realm url"},
 	{Key: KeyServerKeycloakClientID, Flag: flag(KeyServerKeycloakClientID), Default: "otterscale", Description: "Server keycloak client id"},
@@ -51,7 +51,7 @@ var ServerOptions = []ConfigOption{
 
 var AgentOptions = []ConfigOption{
 	{Key: KeyAgentCluster, Flag: flag(KeyAgentCluster), Default: "default", Description: "Agent cluster"},
-	{Key: KeyAgentTunnelServerURL, Flag: flag(KeyAgentTunnelServerURL), Default: "https://server.otterscale.io", Description: "Agent tunnel server url"},
+	{Key: KeyAgentTunnelServerURL, Flag: flag(KeyAgentTunnelServerURL), Default: "http://127.0.0.1:8300", Description: "Agent tunnel server url"},
 	{Key: KeyAgentTunnelFingerprint, Flag: flag(KeyAgentTunnelFingerprint), Default: "", Description: "Agent tunnel fingerprint"},
 	{Key: KeyAgentTunnelAuth, Flag: flag(KeyAgentTunnelAuth), Default: "user:pass", Description: "Agent tunnel auth"},
 	{Key: KeyAgentTunnelPort, Flag: flag(KeyAgentTunnelPort), Default: 16598, Description: "Agent tunnel port"},

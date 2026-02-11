@@ -11,8 +11,6 @@ import (
 
 	"github.com/otterscale/otterscale-agent/internal/cmd"
 	"github.com/otterscale/otterscale-agent/internal/config"
-	"github.com/otterscale/otterscale-agent/internal/core"
-	"github.com/otterscale/otterscale-agent/internal/mux"
 )
 
 // version is typically injected at build time via -ldflags.
@@ -45,7 +43,10 @@ func run(ctx context.Context) error {
 }
 
 // newCmd is a Wire provider responsible for constructing the Root Command.
-func newCmd(conf *config.Config, hub *mux.Hub, tunnel core.TunnelProvider) (*cobra.Command, error) {
+// Server-specific dependencies (Hub, TunnelProvider) are created lazily via
+// wireServerDeps so that running `otterscale agent` does not trigger their
+// initialization (e.g. chisel tunnel server).
+func newCmd(conf *config.Config) (*cobra.Command, error) {
 	c := &cobra.Command{
 		Use:           "otterscale",
 		Short:         "OtterScale: A unified platform for simplified compute, storage, and networking.",
@@ -54,7 +55,9 @@ func newCmd(conf *config.Config, hub *mux.Hub, tunnel core.TunnelProvider) (*cob
 		SilenceErrors: true, // Silence errors here so we can handle printing centrally in main.
 	}
 
-	serverCmd, err := cmd.NewServer(conf, hub, tunnel)
+	serverCmd, err := cmd.NewServer(conf, func() (*cmd.ServerDeps, func(), error) {
+		return wireServerDeps(conf)
+	})
 	if err != nil {
 		return nil, err
 	}

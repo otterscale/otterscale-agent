@@ -23,12 +23,6 @@ func WithUserInfo(ctx context.Context, info UserInfo) context.Context {
 	return context.WithValue(ctx, userInfoKey, info)
 }
 
-// GetUser retrieves only the subject string for backward compatibility.
-func GetUser(ctx context.Context) (string, bool) {
-	info, ok := GetUserInfo(ctx)
-	return info.Subject, ok
-}
-
 // WithUser stores a user subject in the context (backward compatible helper).
 func WithUser(ctx context.Context, user string) context.Context {
 	return WithUserInfo(ctx, UserInfo{Subject: user, Groups: []string{"system:authenticated"}})

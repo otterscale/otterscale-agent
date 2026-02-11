@@ -1,7 +1,9 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net"
@@ -9,11 +11,13 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"strings"
 
 	chclient "github.com/jpillora/chisel/client"
 	"github.com/otterscale/otterscale-agent/internal/config"
 	"github.com/spf13/cobra"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
 )
 
 // TODO: refactor to domain-driven architecture
@@ -46,29 +50,36 @@ func runAgent(ctx context.Context, conf *config.Config) error {
 	// 1. Prepare the reverse proxy for the Kubernetes API Server.
 	var k8sProxy *httputil.ReverseProxy
 	var err error
-	if debugEnabled {
+	if debugEnabled && kubeAPIURL != "" {
 		k8sProxy, err = newKubeAPIProxyFromURL(kubeAPIURL)
-	} else {
-		k8sProxy, err = newKubeAPIProxy()
 	}
+
+	k8sProxy, err = newKubeAPIProxy(debugEnabled)
 	if err != nil {
 		return fmt.Errorf("failed to create k8s proxy: %w", err)
 	}
 
-	// 2. Listen on a random local port (target for the tunnel).
+	// 2. Register this agent with the server (obtains the fingerprint dynamically).
+	fingerprint, err := registerWithServer(conf)
+	if err != nil {
+		return fmt.Errorf("failed to register with server: %w", err)
+	}
+	slog.Info("Registered with server", "fingerprint", fingerprint)
+
+	// 3. Listen on a random local port (target for the tunnel).
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return fmt.Errorf("failed to listen on local port: %w", err)
 	}
 	localProxyPort := listener.Addr().(*net.TCPAddr).Port
 
-	// 3. Prepare the Chisel Reverse Tunnel Client.
-	tunnelClient, err := newTunnelClient(conf, localProxyPort)
+	// 4. Prepare the Chisel Reverse Tunnel Client.
+	tunnelClient, err := newTunnelClient(conf, localProxyPort, fingerprint)
 	if err != nil {
 		return fmt.Errorf("failed to create tunnel client: %w", err)
 	}
 
-	// 4. Start services (concurrently).
+	// 5. Start services (concurrently).
 	errChan := make(chan error, 1)
 
 	// Goroutine: Run the local Auth-Proxy Server.
@@ -93,7 +104,7 @@ func runAgent(ctx context.Context, conf *config.Config) error {
 		}
 	}()
 
-	// 5. Wait for error or Context cancellation.
+	// 6. Wait for error or Context cancellation.
 	select {
 	case err := <-errChan:
 		return err
@@ -105,15 +116,22 @@ func runAgent(ctx context.Context, conf *config.Config) error {
 }
 
 // newTunnelClient creates a Chisel Client instance.
-func newTunnelClient(conf *config.Config, localPort int) (*chclient.Client, error) {
+// The fingerprint is obtained dynamically from the registration response.
+// If the agent has a statically-configured fingerprint, it takes precedence.
+func newTunnelClient(conf *config.Config, localPort int, registeredFingerprint string) (*chclient.Client, error) {
 	var (
-		cluster     = conf.AgentCluster()
-		serverURL   = conf.AgentTunnelServerURL()
-		auth        = conf.AgentTunnelAuth()
-		fingerprint = conf.AgentTunnelFingerprint()
-		tunnelPort  = conf.AgentTunnelPort()
-		timeout     = conf.AgentTunnelTimeout()
+		cluster    = conf.AgentCluster()
+		serverURL  = conf.AgentTunnelServerURL()
+		auth       = conf.AgentTunnelAuth()
+		tunnelPort = conf.AgentTunnelPort()
+		timeout    = conf.AgentTunnelTimeout()
 	)
+
+	// Prefer static config fingerprint if set; otherwise use the one from registration.
+	fingerprint := conf.AgentTunnelFingerprint()
+	if fingerprint == "" {
+		fingerprint = registeredFingerprint
+	}
 
 	hostname, err := os.Hostname()
 	if err != nil {
@@ -140,11 +158,60 @@ func newTunnelClient(conf *config.Config, localPort int) (*chclient.Client, erro
 	return chclient.NewClient(chiselConfig)
 }
 
+// registerWithServer sends a registration request to the tunnel server so
+// the server creates the chisel user and port mapping for this cluster.
+// Returns the server fingerprint for tunnel verification.
+func registerWithServer(conf *config.Config) (string, error) {
+	serverURL := conf.AgentTunnelServerURL()
+	auth := conf.AgentTunnelAuth() // "user:pass"
+	cluster := conf.AgentCluster()
+	tunnelPort := conf.AgentTunnelPort()
+
+	body, err := json.Marshal(map[string]any{
+		"cluster":     cluster,
+		"tunnel_port": tunnelPort,
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal registration body: %w", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, serverURL+"/v1/register", bytes.NewReader(body))
+	if err != nil {
+		return "", fmt.Errorf("failed to create registration request: %w", err)
+	}
+
+	parts := strings.SplitN(auth, ":", 2)
+	if len(parts) != 2 {
+		return "", fmt.Errorf("invalid tunnel auth format, expected user:pass")
+	}
+	req.SetBasicAuth(parts[0], parts[1])
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("registration request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("registration failed with status %d", resp.StatusCode)
+	}
+
+	var result struct {
+		Fingerprint string `json:"fingerprint"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("failed to decode registration response: %w", err)
+	}
+
+	return result.Fingerprint, nil
+}
+
 // newKubeAPIProxy creates a reverse proxy pointing to the in-cluster API Server.
 // It relies on rest.TransportFor to handle automatic token rotation from the
 // projected ServiceAccount token file, instead of injecting a static BearerToken.
-func newKubeAPIProxy() (*httputil.ReverseProxy, error) {
-	config, err := rest.InClusterConfig()
+func newKubeAPIProxy(debugEnabled bool) (*httputil.ReverseProxy, error) {
+	config, err := loadKubeConfig(debugEnabled)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load in-cluster config: %w", err)
 	}
@@ -190,4 +257,20 @@ func newKubeAPIProxyFromURL(rawURL string) (*httputil.ReverseProxy, error) {
 	}
 
 	return proxy, nil
+}
+
+func loadKubeConfig(debugEnabled bool) (*rest.Config, error) {
+	if debugEnabled {
+		kubeconfig := os.Getenv("KUBECONFIG")
+		if kubeconfig == "" {
+			home, _ := os.UserHomeDir()
+			if home != "" {
+				kubeconfig = home + "/.kube/config"
+			}
+		}
+
+		return clientcmd.BuildConfigFromFlags("", kubeconfig)
+	}
+
+	return rest.InClusterConfig()
 }
