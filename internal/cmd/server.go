@@ -20,8 +20,8 @@ func NewServer(conf *config.Config, hub *mux.Hub, tunnel core.TunnelProvider) *c
 	cmd := &cobra.Command{
 		Use:     "server",
 		Short:   "Start server that provides gRPC and HTTP endpoints for the core services",
-		Example: "otterscale server --address=:8299 --config=otterscale.yaml",
-		RunE: func(_ *cobra.Command, _ []string) error {
+		Example: "otterscale server --address=:8299 --tunnel-address=127.0.0.1:16598",
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			slog.Info("Starting tunnel server", "address", tunnelAddress)
 			if err := tunnel.Start(tunnelAddress); err != nil {
 				return fmt.Errorf("failed to start tunnel server: %w", err)
@@ -38,7 +38,7 @@ func NewServer(conf *config.Config, hub *mux.Hub, tunnel core.TunnelProvider) *c
 			}
 
 			slog.Info("Starting HTTP server", "address", address)
-			return startHTTPServer(address, hub, connect.WithInterceptors(openTelemetryInterceptor, impersonationInterceptor))
+			return startHTTPServer(cmd.Context(), address, hub, conf.CORSAllowedOrigins(), connect.WithInterceptors(openTelemetryInterceptor, impersonationInterceptor))
 		},
 	}
 

@@ -4,6 +4,7 @@ go 1.25.6
 
 require (
 	connectrpc.com/connect v1.19.1
+	connectrpc.com/cors v0.1.0
 	connectrpc.com/grpchealth v1.4.0
 	connectrpc.com/grpcreflect v1.3.0
 	connectrpc.com/otelconnect v0.9.0

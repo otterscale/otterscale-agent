@@ -1,12 +1,15 @@
 package cmd
 
 import (
+	"context"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
 	"time"
 
 	"connectrpc.com/connect"
+	connectcors "connectrpc.com/cors"
 	"github.com/rs/cors"
 )
 
@@ -15,9 +18,22 @@ type handler interface {
 	RegisterHandlers(opts []connect.HandlerOption) error
 }
 
-func startHTTPServer(address string, handler handler, opts ...connect.HandlerOption) error {
+func startHTTPServer(ctx context.Context, address string, handler handler, allowedOrigins []string, opts ...connect.HandlerOption) error {
 	if err := handler.RegisterHandlers(opts); err != nil {
 		return err
+	}
+
+	var corsHandler *cors.Cors
+	if len(allowedOrigins) == 0 {
+		corsHandler = cors.AllowAll()
+	} else {
+		corsHandler = cors.New(cors.Options{
+			AllowedOrigins:   allowedOrigins,
+			AllowedMethods:   connectcors.AllowedMethods(),
+			AllowedHeaders:   connectcors.AllowedHeaders(),
+			ExposedHeaders:   connectcors.ExposedHeaders(),
+			AllowCredentials: true,
+		})
 	}
 
 	protocols := new(http.Protocols)
@@ -26,7 +42,7 @@ func startHTTPServer(address string, handler handler, opts ...connect.HandlerOpt
 
 	srv := &http.Server{
 		Addr:              address,
-		Handler:           cors.AllowAll().Handler(handler),
+		Handler:           corsHandler.Handler(handler),
 		ReadHeaderTimeout: time.Second,
 		ReadTimeout:       5 * time.Minute,
 		WriteTimeout:      5 * time.Minute,
@@ -39,6 +55,31 @@ func startHTTPServer(address string, handler handler, opts ...connect.HandlerOpt
 		return err
 	}
 
+	serverErr := make(chan error, 1)
+
 	slog.Info("Server starting on", "address", listener.Addr().String())
-	return srv.Serve(listener)
+	go func() {
+		if err := srv.Serve(listener); err != nil && err != http.ErrServerClosed {
+			serverErr <- err
+		}
+		close(serverErr)
+	}()
+
+	select {
+	case err := <-serverErr:
+		return fmt.Errorf("server error: %w", err)
+
+	case <-ctx.Done():
+		slog.Info("Gracefully shutting down HTTP server...")
+
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			return fmt.Errorf("HTTP server forced to shutdown: %w", err)
+		}
+
+		slog.Info("HTTP server stopped gracefully")
+		return nil
+	}
 }
