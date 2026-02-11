@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -103,7 +104,12 @@ func (s *ResourceService) Apply(ctx context.Context, req *pb.ApplyRequest) (*pb.
 }
 
 func (s *ResourceService) Delete(ctx context.Context, req *pb.DeleteRequest) (*emptypb.Empty, error) {
-	if err := s.resource.DeleteResource(ctx, req.GetCluster(), req.GetGroup(), req.GetVersion(), req.GetResource(), req.GetNamespace(), req.GetName(), req.GetGracePeriodSeconds()); err != nil {
+	var gracePeriod *int64
+	if req.HasGracePeriodSeconds() {
+		v := req.GetGracePeriodSeconds()
+		gracePeriod = &v
+	}
+	if err := s.resource.DeleteResource(ctx, req.GetCluster(), req.GetGroup(), req.GetVersion(), req.GetResource(), req.GetNamespace(), req.GetName(), gracePeriod); err != nil {
 		return nil, k8sErrorToConnectError(err)
 	}
 	return &emptypb.Empty{}, nil
@@ -143,11 +149,13 @@ func (s *ResourceService) processEvent(event watch.Event) (*pb.WatchEvent, bool)
 	case watch.Added, watch.Modified, watch.Deleted:
 		obj, ok := event.Object.(*unstructured.Unstructured)
 		if !ok {
+			slog.Warn("watch: unexpected object type", "eventType", event.Type)
 			return nil, false
 		}
 
 		resource, err := s.toProtoResource(obj.Object)
 		if err != nil {
+			slog.Warn("watch: failed to convert resource to proto", "eventType", event.Type, "error", err)
 			return nil, false
 		}
 
@@ -157,7 +165,11 @@ func (s *ResourceService) processEvent(event watch.Event) (*pb.WatchEvent, bool)
 		return ret, true
 
 	case watch.Bookmark:
-		metadata, _ := meta.Accessor(event.Object)
+		metadata, err := meta.Accessor(event.Object)
+		if err != nil {
+			slog.Warn("watch: failed to access bookmark metadata", "error", err)
+			return nil, false
+		}
 
 		ret := &pb.WatchEvent{}
 		ret.SetType(pb.WatchEvent_TYPE_BOOKMARK)
@@ -170,6 +182,7 @@ func (s *ResourceService) processEvent(event watch.Event) (*pb.WatchEvent, bool)
 		return ret, true
 
 	default:
+		slog.Warn("watch: unknown event type", "eventType", event.Type)
 		return nil, false
 	}
 }

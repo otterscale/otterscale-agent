@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"connectrpc.com/connect"
 	"github.com/Masterminds/semver/v3"
@@ -34,6 +35,13 @@ type ResourceRepo interface {
 	Watch(ctx context.Context, cluster string, gvr schema.GroupVersionResource, namespace, labelSelector, fieldSelector, resourceVersion string, sendInitialEvents bool) (watch.Interface, error)
 }
 
+const schemaCacheTTL = 10 * time.Minute
+
+type schemaCacheEntry struct {
+	schema    *spec.Schema
+	expiresAt time.Time
+}
+
 type ResourceUseCase struct {
 	discovery DiscoveryClient
 	resource  ResourceRepo
@@ -57,7 +65,11 @@ func (uc *ResourceUseCase) ResolveSchema(ctx context.Context, cluster, group, ve
 	key := uc.schemaCacheKey(cluster, group, version, kind)
 
 	if v, ok := uc.schemaCache.Load(key); ok {
-		return v.(*spec.Schema), nil
+		entry := v.(*schemaCacheEntry)
+		if time.Now().Before(entry.expiresAt) {
+			return entry.schema, nil
+		}
+		uc.schemaCache.Delete(key)
 	}
 
 	v, err, _ := uc.schemaFlights.Do(key, func() (any, error) {
@@ -66,7 +78,10 @@ func (uc *ResourceUseCase) ResolveSchema(ctx context.Context, cluster, group, ve
 			return nil, err
 		}
 
-		uc.schemaCache.Store(key, schema)
+		uc.schemaCache.Store(key, &schemaCacheEntry{
+			schema:    schema,
+			expiresAt: time.Now().Add(schemaCacheTTL),
+		})
 
 		return schema, nil
 	})
@@ -137,13 +152,13 @@ func (uc *ResourceUseCase) ApplyResource(ctx context.Context, cluster, group, ve
 	return uc.resource.Apply(ctx, cluster, gvr, namespace, name, data, force, fieldManager)
 }
 
-func (uc *ResourceUseCase) DeleteResource(ctx context.Context, cluster, group, version, resource, namespace, name string, gracePeriodSeconds int64) error {
+func (uc *ResourceUseCase) DeleteResource(ctx context.Context, cluster, group, version, resource, namespace, name string, gracePeriodSeconds *int64) error {
 	gvr, err := uc.discovery.LookupResource(ctx, cluster, group, version, resource)
 	if err != nil {
 		return err
 	}
 
-	return uc.resource.Delete(ctx, cluster, gvr, namespace, name, &gracePeriodSeconds)
+	return uc.resource.Delete(ctx, cluster, gvr, namespace, name, gracePeriodSeconds)
 }
 
 func (uc *ResourceUseCase) WatchResource(ctx context.Context, cluster, group, version, resource, namespace, labelSelector, fieldSelector, resourceVersion string) (watch.Interface, error) {
