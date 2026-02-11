@@ -24,6 +24,7 @@ type AgentConfig struct {
 	Fingerprint string
 	TunnelPort  int
 	Timeout     time.Duration
+	KubeAPIURL  string // Optional: override the in-cluster K8s API URL (for testing).
 }
 
 // Validate checks if the required parameters are present.
@@ -59,6 +60,7 @@ func NewAgent() *cobra.Command {
 	f.StringVar(&cfg.Fingerprint, "fingerprint", "", "Server SSH fingerprint")
 	f.IntVar(&cfg.TunnelPort, "tunnel-port", 0, "The dedicated remote port on server for this cluster (e.g. 16598)")
 	f.DurationVar(&cfg.Timeout, "timeout", 30*time.Second, "Connection timeout")
+	f.StringVar(&cfg.KubeAPIURL, "kube-api-url", "", "Override in-cluster K8s API server URL (for testing)")
 
 	return cmd
 }
@@ -66,7 +68,13 @@ func NewAgent() *cobra.Command {
 // runAgent contains the main execution logic for the agent.
 func runAgent(ctx context.Context, cfg *AgentConfig) error {
 	// 1. Prepare the reverse proxy for the Kubernetes API Server.
-	k8sProxy, err := newKubeAPIProxy()
+	var k8sProxy *httputil.ReverseProxy
+	var err error
+	if cfg.KubeAPIURL != "" {
+		k8sProxy, err = newKubeAPIProxyFromURL(cfg.KubeAPIURL)
+	} else {
+		k8sProxy, err = newKubeAPIProxy()
+	}
 	if err != nil {
 		return fmt.Errorf("failed to create k8s proxy: %w", err)
 	}
@@ -176,6 +184,25 @@ func newKubeAPIProxy() (*httputil.ReverseProxy, error) {
 		// automatically injects the latest token from BearerTokenFile.
 	}
 	proxy.Transport = transport
+
+	return proxy, nil
+}
+
+// newKubeAPIProxyFromURL creates a simple reverse proxy to an explicit URL.
+// This is used in integration tests where rest.InClusterConfig is unavailable
+// and the target is a fake K8s API server.
+func newKubeAPIProxyFromURL(rawURL string) (*httputil.ReverseProxy, error) {
+	target, err := url.Parse(rawURL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid kube-api-url: %w", err)
+	}
+
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	proxy.Director = func(req *http.Request) {
+		req.URL.Scheme = target.Scheme
+		req.URL.Host = target.Host
+		req.Host = target.Host
+	}
 
 	return proxy, nil
 }
