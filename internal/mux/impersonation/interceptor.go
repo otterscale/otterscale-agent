@@ -72,7 +72,10 @@ func (i *Interceptor) enrichContextWithSubject(ctx context.Context, h http.Heade
 		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("invalid token"))
 	}
 
-	return identity.WithUser(ctx, idToken.Subject), nil
+	return identity.WithUserInfo(ctx, identity.UserInfo{
+		Subject: idToken.Subject,
+		Groups:  []string{"system:authenticated"}, // hardcoded
+	}), nil
 }
 
 func extractToken(h http.Header) (string, error) {
