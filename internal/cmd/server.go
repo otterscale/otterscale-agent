@@ -15,9 +15,7 @@ import (
 
 // TODO: replicated server
 func NewServer(conf *config.Config, hub *mux.Hub, tunnel core.TunnelProvider) *cobra.Command {
-	var (
-		address, tunnelAddress string
-	)
+	var address, tunnelAddress string
 
 	cmd := &cobra.Command{
 		Use:     "server",
