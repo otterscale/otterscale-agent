@@ -8,17 +8,11 @@ import (
 
 	"connectrpc.com/authn"
 	"github.com/coreos/go-oidc/v3/oidc"
-	"github.com/otterscale/otterscale-agent/internal/config"
 	"github.com/otterscale/otterscale-agent/internal/core"
 )
 
 // NewOIDC creates a new OIDC authentication middleware.
-func NewOIDC(conf *config.Config) (*authn.Middleware, error) {
-	var (
-		issuer   = conf.ServerKeycloakRealmURL()
-		clientID = conf.ServerKeycloakClientID()
-	)
-
+func NewOIDC(issuer, clientID string) (*authn.Middleware, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
