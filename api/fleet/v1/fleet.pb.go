@@ -2,7 +2,7 @@
 // versions:
 // 	protoc-gen-go v1.36.11
 // 	protoc        v6.33.4
-// source: api/tunnel/v1/tunnel.proto
+// source: api/fleet/v1/fleet.proto
 
 package pb
 
@@ -25,6 +25,7 @@ const (
 type RegisterRequest struct {
 	state                  protoimpl.MessageState `protogen:"opaque.v1"`
 	xxx_hidden_Cluster     *string                `protobuf:"bytes,1,opt,name=cluster"`
+	xxx_hidden_AgentId     *string                `protobuf:"bytes,2,opt,name=agent_id,json=agentId"`
 	XXX_raceDetectHookData protoimpl.RaceDetectHookData
 	XXX_presence           [1]uint32
 	unknownFields          protoimpl.UnknownFields
@@ -33,7 +34,7 @@ type RegisterRequest struct {
 
 func (x *RegisterRequest) Reset() {
 	*x = RegisterRequest{}
-	mi := &file_api_tunnel_v1_tunnel_proto_msgTypes[0]
+	mi := &file_api_fleet_v1_fleet_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -45,7 +46,7 @@ func (x *RegisterRequest) String() string {
 func (*RegisterRequest) ProtoMessage() {}
 
 func (x *RegisterRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_tunnel_v1_tunnel_proto_msgTypes[0]
+	mi := &file_api_fleet_v1_fleet_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -66,9 +67,24 @@ func (x *RegisterRequest) GetCluster() string {
 	return ""
 }
 
+func (x *RegisterRequest) GetAgentId() string {
+	if x != nil {
+		if x.xxx_hidden_AgentId != nil {
+			return *x.xxx_hidden_AgentId
+		}
+		return ""
+	}
+	return ""
+}
+
 func (x *RegisterRequest) SetCluster(v string) {
 	x.xxx_hidden_Cluster = &v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 0, 1)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 0, 2)
+}
+
+func (x *RegisterRequest) SetAgentId(v string) {
+	x.xxx_hidden_AgentId = &v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 1, 2)
 }
 
 func (x *RegisterRequest) HasCluster() bool {
@@ -78,9 +94,21 @@ func (x *RegisterRequest) HasCluster() bool {
 	return protoimpl.X.Present(&(x.XXX_presence[0]), 0)
 }
 
+func (x *RegisterRequest) HasAgentId() bool {
+	if x == nil {
+		return false
+	}
+	return protoimpl.X.Present(&(x.XXX_presence[0]), 1)
+}
+
 func (x *RegisterRequest) ClearCluster() {
 	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 0)
 	x.xxx_hidden_Cluster = nil
+}
+
+func (x *RegisterRequest) ClearAgentId() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 1)
+	x.xxx_hidden_AgentId = nil
 }
 
 type RegisterRequest_builder struct {
@@ -88,6 +116,8 @@ type RegisterRequest_builder struct {
 
 	// The cluster identifier this agent belongs to.
 	Cluster *string
+	// The agent identifier this agent uses to register with the server.
+	AgentId *string
 }
 
 func (b0 RegisterRequest_builder) Build() *RegisterRequest {
@@ -95,8 +125,12 @@ func (b0 RegisterRequest_builder) Build() *RegisterRequest {
 	b, x := &b0, m0
 	_, _ = b, x
 	if b.Cluster != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 0, 1)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 0, 2)
 		x.xxx_hidden_Cluster = b.Cluster
+	}
+	if b.AgentId != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 1, 2)
+		x.xxx_hidden_AgentId = b.AgentId
 	}
 	return m0
 }
@@ -105,7 +139,8 @@ func (b0 RegisterRequest_builder) Build() *RegisterRequest {
 type RegisterResponse struct {
 	state                  protoimpl.MessageState `protogen:"opaque.v1"`
 	xxx_hidden_Fingerprint *string                `protobuf:"bytes,1,opt,name=fingerprint"`
-	xxx_hidden_TunnelPort  int32                  `protobuf:"varint,2,opt,name=tunnel_port,json=tunnelPort"`
+	xxx_hidden_Token       *string                `protobuf:"bytes,2,opt,name=token"`
+	xxx_hidden_TunnelPort  int32                  `protobuf:"varint,3,opt,name=tunnel_port,json=tunnelPort"`
 	XXX_raceDetectHookData protoimpl.RaceDetectHookData
 	XXX_presence           [1]uint32
 	unknownFields          protoimpl.UnknownFields
@@ -114,7 +149,7 @@ type RegisterResponse struct {
 
 func (x *RegisterResponse) Reset() {
 	*x = RegisterResponse{}
-	mi := &file_api_tunnel_v1_tunnel_proto_msgTypes[1]
+	mi := &file_api_fleet_v1_fleet_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -126,7 +161,7 @@ func (x *RegisterResponse) String() string {
 func (*RegisterResponse) ProtoMessage() {}
 
 func (x *RegisterResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_tunnel_v1_tunnel_proto_msgTypes[1]
+	mi := &file_api_fleet_v1_fleet_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -147,6 +182,16 @@ func (x *RegisterResponse) GetFingerprint() string {
 	return ""
 }
 
+func (x *RegisterResponse) GetToken() string {
+	if x != nil {
+		if x.xxx_hidden_Token != nil {
+			return *x.xxx_hidden_Token
+		}
+		return ""
+	}
+	return ""
+}
+
 func (x *RegisterResponse) GetTunnelPort() int32 {
 	if x != nil {
 		return x.xxx_hidden_TunnelPort
@@ -156,12 +201,17 @@ func (x *RegisterResponse) GetTunnelPort() int32 {
 
 func (x *RegisterResponse) SetFingerprint(v string) {
 	x.xxx_hidden_Fingerprint = &v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 0, 2)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 0, 3)
+}
+
+func (x *RegisterResponse) SetToken(v string) {
+	x.xxx_hidden_Token = &v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 1, 3)
 }
 
 func (x *RegisterResponse) SetTunnelPort(v int32) {
 	x.xxx_hidden_TunnelPort = v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 1, 2)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 2, 3)
 }
 
 func (x *RegisterResponse) HasFingerprint() bool {
@@ -171,11 +221,18 @@ func (x *RegisterResponse) HasFingerprint() bool {
 	return protoimpl.X.Present(&(x.XXX_presence[0]), 0)
 }
 
-func (x *RegisterResponse) HasTunnelPort() bool {
+func (x *RegisterResponse) HasToken() bool {
 	if x == nil {
 		return false
 	}
 	return protoimpl.X.Present(&(x.XXX_presence[0]), 1)
+}
+
+func (x *RegisterResponse) HasTunnelPort() bool {
+	if x == nil {
+		return false
+	}
+	return protoimpl.X.Present(&(x.XXX_presence[0]), 2)
 }
 
 func (x *RegisterResponse) ClearFingerprint() {
@@ -183,8 +240,13 @@ func (x *RegisterResponse) ClearFingerprint() {
 	x.xxx_hidden_Fingerprint = nil
 }
 
-func (x *RegisterResponse) ClearTunnelPort() {
+func (x *RegisterResponse) ClearToken() {
 	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 1)
+	x.xxx_hidden_Token = nil
+}
+
+func (x *RegisterResponse) ClearTunnelPort() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 2)
 	x.xxx_hidden_TunnelPort = 0
 }
 
@@ -193,7 +255,9 @@ type RegisterResponse_builder struct {
 
 	// The server's tunnel fingerprint, used by the agent to verify the connection.
 	Fingerprint *string
-	// The port on the server side that will be mapped to this agent's local proxy.
+	// The token for the agent to register with the server.
+	Token *string
+	// The port of the tunnel server.
 	TunnelPort *int32
 }
 
@@ -202,39 +266,45 @@ func (b0 RegisterResponse_builder) Build() *RegisterResponse {
 	b, x := &b0, m0
 	_, _ = b, x
 	if b.Fingerprint != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 0, 2)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 0, 3)
 		x.xxx_hidden_Fingerprint = b.Fingerprint
 	}
+	if b.Token != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 1, 3)
+		x.xxx_hidden_Token = b.Token
+	}
 	if b.TunnelPort != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 1, 2)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 2, 3)
 		x.xxx_hidden_TunnelPort = *b.TunnelPort
 	}
 	return m0
 }
 
-var File_api_tunnel_v1_tunnel_proto protoreflect.FileDescriptor
+var File_api_fleet_v1_fleet_proto protoreflect.FileDescriptor
 
-const file_api_tunnel_v1_tunnel_proto_rawDesc = "" +
+const file_api_fleet_v1_fleet_proto_rawDesc = "" +
 	"\n" +
-	"\x1aapi/tunnel/v1/tunnel.proto\x12\x14otterscale.tunnel.v1\x1a\x15api/annotations.proto\"+\n" +
+	"\x18api/fleet/v1/fleet.proto\x12\x13otterscale.fleet.v1\x1a\x15api/annotations.proto\"F\n" +
 	"\x0fRegisterRequest\x12\x18\n" +
-	"\acluster\x18\x01 \x01(\tR\acluster\"U\n" +
+	"\acluster\x18\x01 \x01(\tR\acluster\x12\x19\n" +
+	"\bagent_id\x18\x02 \x01(\tR\aagentId\"k\n" +
 	"\x10RegisterResponse\x12 \n" +
-	"\vfingerprint\x18\x01 \x01(\tR\vfingerprint\x12\x1f\n" +
-	"\vtunnel_port\x18\x02 \x01(\x05R\n" +
-	"tunnelPort2\x81\x01\n" +
-	"\rTunnelService\x12p\n" +
-	"\bRegister\x12%.otterscale.tunnel.v1.RegisterRequest\x1a&.otterscale.tunnel.v1.RegisterResponse\"\x15\x8a\xdf\xd5\x1d\x10\n" +
-	"\x0etunnel-enabledB9Z7github.com/otterscale/otterscale-agent/api/tunnel/v1;pbb\beditionsp\xe8\a"
+	"\vfingerprint\x18\x01 \x01(\tR\vfingerprint\x12\x14\n" +
+	"\x05token\x18\x02 \x01(\tR\x05token\x12\x1f\n" +
+	"\vtunnel_port\x18\x03 \x01(\x05R\n" +
+	"tunnelPort2}\n" +
+	"\fFleetService\x12m\n" +
+	"\bRegister\x12$.otterscale.fleet.v1.RegisterRequest\x1a%.otterscale.fleet.v1.RegisterResponse\"\x14\x8a\xdf\xd5\x1d\x0f\n" +
+	"\rfleet-enabledB8Z6github.com/otterscale/otterscale-agent/api/fleet/v1;pbb\beditionsp\xe8\a"
 
-var file_api_tunnel_v1_tunnel_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
-var file_api_tunnel_v1_tunnel_proto_goTypes = []any{
-	(*RegisterRequest)(nil),  // 0: otterscale.tunnel.v1.RegisterRequest
-	(*RegisterResponse)(nil), // 1: otterscale.tunnel.v1.RegisterResponse
+var file_api_fleet_v1_fleet_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_api_fleet_v1_fleet_proto_goTypes = []any{
+	(*RegisterRequest)(nil),  // 0: otterscale.fleet.v1.RegisterRequest
+	(*RegisterResponse)(nil), // 1: otterscale.fleet.v1.RegisterResponse
 }
-var file_api_tunnel_v1_tunnel_proto_depIdxs = []int32{
-	0, // 0: otterscale.tunnel.v1.TunnelService.Register:input_type -> otterscale.tunnel.v1.RegisterRequest
-	1, // 1: otterscale.tunnel.v1.TunnelService.Register:output_type -> otterscale.tunnel.v1.RegisterResponse
+var file_api_fleet_v1_fleet_proto_depIdxs = []int32{
+	0, // 0: otterscale.fleet.v1.FleetService.Register:input_type -> otterscale.fleet.v1.RegisterRequest
+	1, // 1: otterscale.fleet.v1.FleetService.Register:output_type -> otterscale.fleet.v1.RegisterResponse
 	1, // [1:2] is the sub-list for method output_type
 	0, // [0:1] is the sub-list for method input_type
 	0, // [0:0] is the sub-list for extension type_name
@@ -242,26 +312,26 @@ var file_api_tunnel_v1_tunnel_proto_depIdxs = []int32{
 	0, // [0:0] is the sub-list for field type_name
 }
 
-func init() { file_api_tunnel_v1_tunnel_proto_init() }
-func file_api_tunnel_v1_tunnel_proto_init() {
-	if File_api_tunnel_v1_tunnel_proto != nil {
+func init() { file_api_fleet_v1_fleet_proto_init() }
+func file_api_fleet_v1_fleet_proto_init() {
+	if File_api_fleet_v1_fleet_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_tunnel_v1_tunnel_proto_rawDesc), len(file_api_tunnel_v1_tunnel_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_fleet_v1_fleet_proto_rawDesc), len(file_api_fleet_v1_fleet_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   2,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
-		GoTypes:           file_api_tunnel_v1_tunnel_proto_goTypes,
-		DependencyIndexes: file_api_tunnel_v1_tunnel_proto_depIdxs,
-		MessageInfos:      file_api_tunnel_v1_tunnel_proto_msgTypes,
+		GoTypes:           file_api_fleet_v1_fleet_proto_goTypes,
+		DependencyIndexes: file_api_fleet_v1_fleet_proto_depIdxs,
+		MessageInfos:      file_api_fleet_v1_fleet_proto_msgTypes,
 	}.Build()
-	File_api_tunnel_v1_tunnel_proto = out.File
-	file_api_tunnel_v1_tunnel_proto_goTypes = nil
-	file_api_tunnel_v1_tunnel_proto_depIdxs = nil
+	File_api_fleet_v1_fleet_proto = out.File
+	file_api_fleet_v1_fleet_proto_goTypes = nil
+	file_api_fleet_v1_fleet_proto_depIdxs = nil
 }

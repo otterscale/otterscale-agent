@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net"
 
+	"github.com/google/uuid"
 	chserver "github.com/jpillora/chisel/server"
 )
 
@@ -58,6 +59,12 @@ func NewServer(opts ...ServerOption) (*Server, error) {
 
 	chServer, err := chserver.NewServer(cfg)
 	if err != nil {
+		return nil, err
+	}
+
+	// if no users exist, chisel will allow anyone to connect.
+	disabledUser, disabledPass := uuid.NewString(), uuid.NewString()
+	if err := chServer.AddUser(disabledUser, disabledPass, "127.0.0.1"); err != nil {
 		return nil, err
 	}
 

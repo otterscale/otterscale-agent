@@ -40,6 +40,5 @@ func (c *service) ResolveAddress(cluster string) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("cluster %s not registered", cluster)
 	}
-
 	return fmt.Sprintf("http://127.0.0.1:%d", port), nil
 }

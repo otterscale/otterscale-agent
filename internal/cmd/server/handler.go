@@ -14,16 +14,19 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
+	fleetv1 "github.com/otterscale/otterscale-agent/api/fleet/v1/pbconnect"
 	resourcev1 "github.com/otterscale/otterscale-agent/api/resource/v1/pbconnect"
 	"github.com/otterscale/otterscale-agent/internal/app"
 )
 
 type Handler struct {
+	fleet    *app.FleetService
 	resource *app.ResourceService
 }
 
-func NewHandler(resource *app.ResourceService) *Handler {
+func NewHandler(fleet *app.FleetService, resource *app.ResourceService) *Handler {
 	return &Handler{
+		fleet:    fleet,
 		resource: resource,
 	}
 }
@@ -42,6 +45,7 @@ func (h *Handler) Mount(mux *http.ServeMux) error {
 
 	// Register Observability & Operations (Reflection, Health, Metrics)
 	services := []string{
+		fleetv1.FleetServiceName,
 		resourcev1.ResourceServiceName,
 	}
 
@@ -50,6 +54,7 @@ func (h *Handler) Mount(mux *http.ServeMux) error {
 	}
 
 	// Register Service Handlers
+	mux.Handle(fleetv1.NewFleetServiceHandler(h.fleet, interceptors))
 	mux.Handle(resourcev1.NewResourceServiceHandler(h.resource, interceptors))
 
 	// Register Pending Implementations (TODOs)

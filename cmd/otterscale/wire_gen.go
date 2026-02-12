@@ -8,10 +8,9 @@ package main
 
 import (
 	"github.com/otterscale/otterscale-agent/internal/app"
-	"github.com/otterscale/otterscale-agent/internal/cmd"
+	"github.com/otterscale/otterscale-agent/internal/cmd/server"
 	"github.com/otterscale/otterscale-agent/internal/config"
 	"github.com/otterscale/otterscale-agent/internal/core"
-	"github.com/otterscale/otterscale-agent/internal/mux"
 	"github.com/otterscale/otterscale-agent/internal/providers/chisel"
 	"github.com/otterscale/otterscale-agent/internal/providers/kubernetes"
 	"github.com/spf13/cobra"
@@ -19,8 +18,6 @@ import (
 
 // Injectors from wire.go:
 
-// wireCmd builds the root command with only lightweight dependencies (Config).
-// Server-specific dependencies are deferred to wireServerDeps.
 func wireCmd() (*cobra.Command, func(), error) {
 	configConfig, err := config.New()
 	if err != nil {
@@ -34,25 +31,17 @@ func wireCmd() (*cobra.Command, func(), error) {
 	}, nil
 }
 
-// wireServerDeps builds the heavy server-specific dependencies (Hub, TunnelProvider)
-// on demand. This is called lazily inside the server subcommand's RunE, so that
-// running `otterscale agent` never triggers chisel server initialization.
-func wireServerDeps(conf *config.Config) (*cmd.ServerDeps, func(), error) {
-	tunnelProvider, err := chisel.NewChiselService(conf)
-	if err != nil {
-		return nil, nil, err
-	}
+func wireServer() (*server.Server, func(), error) {
+	tunnelProvider := chisel.NewService()
+	fleetUseCase := core.NewFleetUseCase(tunnelProvider)
+	fleetService := app.NewFleetService(fleetUseCase)
 	kubernetesKubernetes := kubernetes.New(tunnelProvider)
 	discoveryClient := kubernetes.NewDiscoveryClient(kubernetesKubernetes)
 	resourceRepo := kubernetes.NewResourceRepo(kubernetesKubernetes)
 	resourceUseCase := core.NewResourceUseCase(discoveryClient, resourceRepo)
 	resourceService := app.NewResourceService(resourceUseCase)
-	hub := mux.NewHub(resourceService)
-	middleware, err := mux.NewAuthMiddleware(conf)
-	if err != nil {
-		return nil, nil, err
-	}
-	serverDeps := cmd.NewServerDeps(hub, tunnelProvider, middleware)
-	return serverDeps, func() {
+	handler := server.NewHandler(fleetService, resourceService)
+	serverServer := server.NewServer(handler, tunnelProvider)
+	return serverServer, func() {
 	}, nil
 }

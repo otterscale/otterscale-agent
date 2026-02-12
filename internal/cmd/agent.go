@@ -21,7 +21,7 @@ import (
 )
 
 // TODO: refactor to domain-driven architecture
-func NewAgent(conf *config.Config) (*cobra.Command, error) {
+func NewAgentCommand(conf *config.Config) (*cobra.Command, error) {
 	cmd := &cobra.Command{
 		Use:     "agent",
 		Short:   "Start agent that connects to server and executes requests in-cluster",
@@ -41,29 +41,22 @@ func NewAgent(conf *config.Config) (*cobra.Command, error) {
 // runAgent contains the main execution logic for the agent.
 func runAgent(ctx context.Context, conf *config.Config) error {
 	var (
-		debugEnabled = conf.AgentDebugEnabled()
-		kubeAPIURL   = conf.AgentDebugKubeAPIURL()
-		serverURL    = conf.AgentTunnelServerURL()
-		tunnelPort   = conf.AgentTunnelPort()
+		serverURL  = conf.AgentTunnelServerURL()
+		tunnelPort = conf.AgentTunnelPort()
 	)
 
 	// 1. Prepare the reverse proxy for the Kubernetes API Server.
-	var k8sProxy *httputil.ReverseProxy
-	var err error
-	if debugEnabled && kubeAPIURL != "" {
-		k8sProxy, err = newKubeAPIProxyFromURL(kubeAPIURL)
-	}
-
-	k8sProxy, err = newKubeAPIProxy(debugEnabled)
+	k8sProxy, err := newKubeAPIProxy()
 	if err != nil {
 		return fmt.Errorf("failed to create k8s proxy: %w", err)
 	}
 
 	// 2. Register this agent with the server (obtains the fingerprint dynamically).
-	fingerprint, err := registerWithServer(conf)
-	if err != nil {
-		return fmt.Errorf("failed to register with server: %w", err)
-	}
+	// fingerprint, err := registerWithServer(conf)
+	// if err != nil {
+	// 	return fmt.Errorf("failed to register with server: %w", err)
+	// }
+	fingerprint := conf.AgentTunnelFingerprint()
 	slog.Info("Registered with server", "fingerprint", fingerprint)
 
 	// 3. Listen on a random local port (target for the tunnel).
@@ -131,6 +124,10 @@ func newTunnelClient(conf *config.Config, localPort int, registeredFingerprint s
 	fingerprint := conf.AgentTunnelFingerprint()
 	if fingerprint == "" {
 		fingerprint = registeredFingerprint
+	}
+
+	if fingerprint == "" {
+		return nil, fmt.Errorf("fingerprint is required")
 	}
 
 	hostname, err := os.Hostname()
@@ -210,8 +207,8 @@ func registerWithServer(conf *config.Config) (string, error) {
 // newKubeAPIProxy creates a reverse proxy pointing to the in-cluster API Server.
 // It relies on rest.TransportFor to handle automatic token rotation from the
 // projected ServiceAccount token file, instead of injecting a static BearerToken.
-func newKubeAPIProxy(debugEnabled bool) (*httputil.ReverseProxy, error) {
-	config, err := loadKubeConfig(debugEnabled)
+func newKubeAPIProxy() (*httputil.ReverseProxy, error) {
+	config, err := loadKubeConfig()
 	if err != nil {
 		return nil, fmt.Errorf("failed to load in-cluster config: %w", err)
 	}
@@ -259,18 +256,20 @@ func newKubeAPIProxyFromURL(rawURL string) (*httputil.ReverseProxy, error) {
 	return proxy, nil
 }
 
-func loadKubeConfig(debugEnabled bool) (*rest.Config, error) {
-	if debugEnabled {
-		kubeconfig := os.Getenv("KUBECONFIG")
-		if kubeconfig == "" {
-			home, _ := os.UserHomeDir()
-			if home != "" {
-				kubeconfig = home + "/.kube/config"
-			}
-		}
-
-		return clientcmd.BuildConfigFromFlags("", kubeconfig)
+func loadKubeConfig() (*rest.Config, error) {
+	cfg, err := rest.InClusterConfig()
+	if err == nil {
+		return cfg, nil
 	}
 
-	return rest.InClusterConfig()
+	// fallback to kubeconfig file
+	kubeconfig := os.Getenv("KUBECONFIG")
+	if kubeconfig == "" {
+		home, _ := os.UserHomeDir()
+		if home != "" {
+			kubeconfig = home + "/.kube/config"
+		}
+	}
+
+	return clientcmd.BuildConfigFromFlags("", kubeconfig)
 }

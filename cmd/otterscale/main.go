@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/otterscale/otterscale-agent/internal/cmd"
+	"github.com/otterscale/otterscale-agent/internal/cmd/server"
 	"github.com/otterscale/otterscale-agent/internal/config"
 )
 
@@ -43,9 +44,6 @@ func run(ctx context.Context) error {
 }
 
 // newCmd is a Wire provider responsible for constructing the Root Command.
-// Server-specific dependencies (Hub, TunnelProvider) are created lazily via
-// wireServerDeps so that running `otterscale agent` does not trigger their
-// initialization (e.g. chisel tunnel server).
 func newCmd(conf *config.Config) (*cobra.Command, error) {
 	c := &cobra.Command{
 		Use:           "otterscale",
@@ -55,14 +53,21 @@ func newCmd(conf *config.Config) (*cobra.Command, error) {
 		SilenceErrors: true, // Silence errors here so we can handle printing centrally in main.
 	}
 
-	serverCmd, err := cmd.NewServer(conf, func() (*cmd.ServerDeps, func(), error) {
-		return wireServerDeps(conf)
+	serverCmd, err := cmd.NewServerCommand(conf, func() (*server.Server, func(), error) {
+		return wireServer()
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	agentCmd, err := cmd.NewAgent(conf)
+	// agentCmd, err := cmd.NewAgentCommand(conf, func() (*cmd.Agent, func(), error) {
+	// 	return wireAgent()
+	// })
+	// if err != nil {
+	// 	return nil, err
+	// }
+
+	agentCmd, err := cmd.NewAgentCommand(conf)
 	if err != nil {
 		return nil, err
 	}
