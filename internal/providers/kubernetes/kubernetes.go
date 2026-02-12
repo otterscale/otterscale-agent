@@ -11,7 +11,6 @@ import (
 	"k8s.io/client-go/rest"
 
 	"github.com/otterscale/otterscale-agent/internal/core"
-	"github.com/otterscale/otterscale-agent/internal/mux"
 )
 
 type Kubernetes struct {
@@ -26,7 +25,7 @@ func New(tunnel core.TunnelProvider) *Kubernetes {
 }
 
 func (k *Kubernetes) impersonationConfig(ctx context.Context, cluster string) (*rest.Config, error) {
-	userInfo, ok := authn.GetInfo(ctx).(mux.UserInfo)
+	userInfo, ok := authn.GetInfo(ctx).(core.UserInfo)
 	if !ok {
 		return nil, connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("user info not found in context"))
 	}
