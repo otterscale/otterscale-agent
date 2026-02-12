@@ -48,7 +48,11 @@ func wireServerDeps(conf *config.Config) (*cmd.ServerDeps, func(), error) {
 	resourceUseCase := core.NewResourceUseCase(discoveryClient, resourceRepo)
 	resourceService := app.NewResourceService(resourceUseCase)
 	hub := mux.NewHub(resourceService)
-	serverDeps := cmd.NewServerDeps(hub, tunnelProvider)
+	middleware, err := mux.NewAuthMiddleware(conf)
+	if err != nil {
+		return nil, nil, err
+	}
+	serverDeps := cmd.NewServerDeps(hub, tunnelProvider, middleware)
 	return serverDeps, func() {
 	}, nil
 }

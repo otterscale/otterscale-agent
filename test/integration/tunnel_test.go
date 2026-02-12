@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"connectrpc.com/connect"
+	"connectrpc.com/authn"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	pb "github.com/otterscale/otterscale-agent/api/resource/v1"
@@ -20,7 +20,6 @@ import (
 	"github.com/otterscale/otterscale-agent/internal/cmd"
 	"github.com/otterscale/otterscale-agent/internal/config"
 	"github.com/otterscale/otterscale-agent/internal/core"
-	"github.com/otterscale/otterscale-agent/internal/identity"
 	"github.com/otterscale/otterscale-agent/internal/mux"
 	"github.com/otterscale/otterscale-agent/internal/providers/chisel"
 	"github.com/otterscale/otterscale-agent/internal/providers/kubernetes"
@@ -152,32 +151,6 @@ func newFakeK8sServer(t *testing.T) *httptest.Server {
 }
 
 // ---------------------------------------------------------------------------
-// Test Auth Interceptor (replaces Keycloak OIDC interceptor)
-// ---------------------------------------------------------------------------
-
-type testAuthInterceptor struct {
-	userInfo identity.UserInfo
-}
-
-func (i *testAuthInterceptor) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
-	return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
-		ctx = identity.WithUserInfo(ctx, i.userInfo)
-		return next(ctx, req)
-	}
-}
-
-func (i *testAuthInterceptor) WrapStreamingClient(next connect.StreamingClientFunc) connect.StreamingClientFunc {
-	return next
-}
-
-func (i *testAuthInterceptor) WrapStreamingHandler(next connect.StreamingHandlerFunc) connect.StreamingHandlerFunc {
-	return func(ctx context.Context, conn connect.StreamingHandlerConn) error {
-		ctx = identity.WithUserInfo(ctx, i.userInfo)
-		return next(ctx, conn)
-	}
-}
-
-// ---------------------------------------------------------------------------
 // Integration Test
 // ---------------------------------------------------------------------------
 
@@ -238,18 +211,18 @@ func TestTunnelListPods(t *testing.T) {
 
 	// ---- 5. Start server ----
 	// debug=true bypasses the OIDC interceptor that requires a real Keycloak.
-	// The testAuthInterceptor is passed via extraInterceptors to inject
-	// identity.UserInfo into the request context (required by impersonationConfig).
-	authInterceptor := &testAuthInterceptor{
-		userInfo: identity.UserInfo{
+	// A test authn.Middleware is used to inject mux.UserInfo into the request
+	// context (required by impersonationConfig).
+	authMiddleware := authn.NewMiddleware(func(_ context.Context, _ *http.Request) (any, error) {
+		return mux.UserInfo{
 			Subject: "test-user",
 			Groups:  []string{"system:authenticated"},
-		},
-	}
+		}, nil
+	})
 
 	serverCmd, err := cmd.NewServer(conf, func() (*cmd.ServerDeps, func(), error) {
-		return cmd.NewServerDeps(hub, tunnel), func() {}, nil
-	}, authInterceptor)
+		return cmd.NewServerDeps(hub, tunnel, authMiddleware), func() {}, nil
+	})
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}

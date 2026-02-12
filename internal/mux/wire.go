@@ -4,4 +4,4 @@ import (
 	"github.com/google/wire"
 )
 
-var ProviderSet = wire.NewSet(NewHub, NewSpoke)
+var ProviderSet = wire.NewSet(NewAuthMiddleware, NewHub, NewSpoke)

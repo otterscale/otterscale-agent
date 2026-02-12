@@ -6,10 +6,12 @@ import (
 	"net/http"
 	"sync"
 
+	"connectrpc.com/authn"
+	"connectrpc.com/connect"
 	"k8s.io/client-go/rest"
 
 	"github.com/otterscale/otterscale-agent/internal/core"
-	"github.com/otterscale/otterscale-agent/internal/identity"
+	"github.com/otterscale/otterscale-agent/internal/mux"
 )
 
 type Kubernetes struct {
@@ -24,14 +26,14 @@ func New(tunnel core.TunnelProvider) *Kubernetes {
 }
 
 func (k *Kubernetes) impersonationConfig(ctx context.Context, cluster string) (*rest.Config, error) {
-	userInfo, ok := identity.GetUserInfo(ctx)
+	userInfo, ok := authn.GetInfo(ctx).(mux.UserInfo)
 	if !ok {
-		return nil, fmt.Errorf("user info not found in context")
+		return nil, connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("user info not found in context"))
 	}
 
 	address, err := k.tunnel.GetTunnelAddress(cluster)
 	if err != nil {
-		return nil, fmt.Errorf("tunnel unavailable: %w", err)
+		return nil, connect.NewError(connect.CodeUnavailable, fmt.Errorf("tunnel unavailable: %w", err))
 	}
 
 	cfg := &rest.Config{
@@ -50,7 +52,7 @@ func (k *Kubernetes) impersonationConfig(ctx context.Context, cluster string) (*
 	} else {
 		t, err := rest.TransportFor(&rest.Config{Host: address})
 		if err != nil {
-			return nil, fmt.Errorf("failed to create transport for cluster %s: %w", cluster, err)
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to create transport for cluster %s: %w", cluster, err))
 		}
 		actual, _ := k.transports.LoadOrStore(cluster, t)
 		cfg.Transport = actual.(http.RoundTripper)

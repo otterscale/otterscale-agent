@@ -29,7 +29,7 @@ func NewHub(resource *app.ResourceService) *Hub {
 	}
 }
 
-func (h *Hub) RegisterHandlers(opts []connect.HandlerOption) error {
+func (h *Hub) RegisterHandlers(opts ...connect.HandlerOption) error {
 	// Prepare service names for reflection and health check
 	services := []string{
 		resourcev1.ResourceServiceName,

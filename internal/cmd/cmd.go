@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"connectrpc.com/authn"
 	"connectrpc.com/connect"
 	connectcors "connectrpc.com/cors"
 	"github.com/rs/cors"
@@ -15,11 +16,11 @@ import (
 
 type handler interface {
 	ServeHTTP(http.ResponseWriter, *http.Request)
-	RegisterHandlers(opts []connect.HandlerOption) error
+	RegisterHandlers(opts ...connect.HandlerOption) error
 }
 
-func startHTTPServer(ctx context.Context, handler handler, address string, allowedOrigins []string, opts ...connect.HandlerOption) error {
-	if err := handler.RegisterHandlers(opts); err != nil {
+func startHTTPServer(ctx context.Context, handler handler, authMiddleware *authn.Middleware, address string, allowedOrigins []string, opts ...connect.HandlerOption) error {
+	if err := handler.RegisterHandlers(opts...); err != nil {
 		return err
 	}
 
@@ -42,7 +43,7 @@ func startHTTPServer(ctx context.Context, handler handler, address string, allow
 
 	srv := &http.Server{
 		Addr:              address,
-		Handler:           corsHandler.Handler(handler),
+		Handler:           corsHandler.Handler(authMiddleware.Wrap(handler)),
 		ReadHeaderTimeout: time.Second,
 		ReadTimeout:       5 * time.Minute,
 		WriteTimeout:      5 * time.Minute,

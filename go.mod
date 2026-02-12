@@ -3,6 +3,7 @@ module github.com/otterscale/otterscale-agent
 go 1.25.6
 
 require (
+	connectrpc.com/authn v0.2.0
 	connectrpc.com/connect v1.19.1
 	connectrpc.com/cors v0.1.0
 	connectrpc.com/grpchealth v1.4.0

@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"log/slog"
 
+	"connectrpc.com/authn"
 	"connectrpc.com/connect"
 	"connectrpc.com/otelconnect"
 	"github.com/otterscale/otterscale-agent/internal/config"
 	"github.com/otterscale/otterscale-agent/internal/core"
 	"github.com/otterscale/otterscale-agent/internal/mux"
-	"github.com/otterscale/otterscale-agent/internal/mux/impersonation"
 	"github.com/spf13/cobra"
 )
 
@@ -17,13 +17,14 @@ import (
 // These are created lazily (via ServerDepsFactory) so that running `otterscale agent`
 // does not trigger their initialization (e.g. chisel tunnel server).
 type ServerDeps struct {
-	Hub    *mux.Hub
-	Tunnel core.TunnelProvider
+	Hub            *mux.Hub
+	Tunnel         core.TunnelProvider
+	AuthMiddleware *authn.Middleware
 }
 
 // NewServerDeps is a Wire provider that assembles the ServerDeps struct.
-func NewServerDeps(hub *mux.Hub, tunnel core.TunnelProvider) *ServerDeps {
-	return &ServerDeps{Hub: hub, Tunnel: tunnel}
+func NewServerDeps(hub *mux.Hub, tunnel core.TunnelProvider, authMiddleware *authn.Middleware) *ServerDeps {
+	return &ServerDeps{Hub: hub, Tunnel: tunnel, AuthMiddleware: authMiddleware}
 }
 
 // ServerDepsFactory creates server-specific dependencies on demand.
@@ -61,16 +62,11 @@ func NewServer(conf *config.Config, factory ServerDepsFactory, interceptors ...c
 					return err
 				}
 
-				impersonationInterceptor, err := impersonation.NewInterceptor(conf)
-				if err != nil {
-					return err
-				}
-
-				interceptors = append(interceptors, openTelemetryInterceptor, impersonationInterceptor)
+				interceptors = append(interceptors, openTelemetryInterceptor)
 			}
 
 			slog.Info("Starting HTTP server", "address", address, "allowedOrigins", allowedOrigins)
-			return startHTTPServer(cmd.Context(), deps.Hub, address, allowedOrigins, connect.WithInterceptors(interceptors...))
+			return startHTTPServer(cmd.Context(), deps.Hub, deps.AuthMiddleware, address, allowedOrigins, connect.WithInterceptors(interceptors...))
 		},
 	}
 

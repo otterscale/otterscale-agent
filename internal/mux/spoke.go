@@ -26,7 +26,7 @@ func NewSpoke(resource SpokeResourceHandler) *Spoke {
 	}
 }
 
-func (s *Spoke) RegisterHandlers(opts []connect.HandlerOption) error {
+func (s *Spoke) RegisterHandlers(opts ...connect.HandlerOption) error {
 	// Health endpoint for tunnel keepalive/readiness checks.
 	s.HandleFunc("/ping", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
