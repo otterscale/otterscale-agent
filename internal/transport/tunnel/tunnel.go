@@ -8,6 +8,9 @@ import (
 	chserver "github.com/jpillora/chisel/server"
 )
 
+// ServerFunc is a function that returns a existing chisel server.
+type ServerFunc func() *chserver.Server
+
 // Option defines a functional option for configuring the tunnel.
 type ServerOption func(*Server)
 
@@ -32,9 +35,9 @@ func WithKeySeed(keySeed string) ServerOption {
 }
 
 // WithServer configures the tunnel server.
-func WithServer(server *chserver.Server) ServerOption {
+func WithServer(server ServerFunc) ServerOption {
 	return func(o *Server) {
-		o.Server = server
+		o.Server = server()
 	}
 }
 
