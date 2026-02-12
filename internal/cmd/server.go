@@ -1,22 +1,15 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
-	"time"
 
 	"github.com/spf13/cobra"
-	"golang.org/x/sync/errgroup"
 
+	"github.com/otterscale/otterscale-agent/internal/cmd/server"
 	"github.com/otterscale/otterscale-agent/internal/config"
-	"github.com/otterscale/otterscale-agent/internal/middleware"
-	"github.com/otterscale/otterscale-agent/internal/mux"
-	"github.com/otterscale/otterscale-agent/internal/transport"
-	"github.com/otterscale/otterscale-agent/internal/transport/http"
-	"github.com/otterscale/otterscale-agent/internal/transport/tunnel"
 )
 
-type ServerInjector func() (*Server, func(), error)
+type ServerInjector func() (*server.Server, func(), error)
 
 // TODO: replicated server
 func NewServerCommand(conf *config.Config, newServer ServerInjector) (*cobra.Command, error) {
@@ -31,13 +24,13 @@ func NewServerCommand(conf *config.Config, newServer ServerInjector) (*cobra.Com
 			}
 			defer cleanup()
 
-			cfg := serverConfig{
-				address:          conf.ServerAddress(),
-				allowedOrigins:   conf.ServerAllowedOrigins(),
-				tunnelAddress:    conf.ServerTunnelAddress(),
-				tunnelKeySeed:    conf.ServerTunnelKeySeed(),
-				keycloakRealmURL: conf.ServerKeycloakRealmURL(),
-				keycloakClientID: conf.ServerKeycloakClientID(),
+			cfg := server.Config{
+				Address:          conf.ServerAddress(),
+				AllowedOrigins:   conf.ServerAllowedOrigins(),
+				TunnelAddress:    conf.ServerTunnelAddress(),
+				TunnelKeySeed:    conf.ServerTunnelKeySeed(),
+				KeycloakRealmURL: conf.ServerKeycloakRealmURL(),
+				KeycloakClientID: conf.ServerKeycloakClientID(),
 			}
 
 			return srv.Run(cmd.Context(), cfg)
@@ -49,65 +42,4 @@ func NewServerCommand(conf *config.Config, newServer ServerInjector) (*cobra.Com
 	}
 
 	return cmd, nil
-}
-
-type serverConfig struct {
-	address          string
-	allowedOrigins   []string
-	tunnelAddress    string
-	tunnelKeySeed    string
-	keycloakRealmURL string
-	keycloakClientID string
-}
-
-type Server struct {
-	hub *mux.Hub
-}
-
-func NewServer(hub *mux.Hub) *Server {
-	return &Server{hub: hub}
-}
-
-func (s *Server) Run(ctx context.Context, cfg serverConfig) error {
-	oidc, err := middleware.NewOIDC(cfg.keycloakRealmURL, cfg.keycloakClientID)
-	if err != nil {
-		return fmt.Errorf("failed to create OIDC middleware: %w", err)
-	}
-
-	httpSrv, err := http.NewServer(
-		http.WithAddress(cfg.address),
-		http.WithMount(s.hub.RegisterHandlers),
-		http.WithAuthMiddleware(oidc),
-		http.WithAllowedOrigins(cfg.allowedOrigins),
-	)
-	if err != nil {
-		return fmt.Errorf("failed to create HTTP server: %w", err)
-	}
-
-	tunnelSrv, err := tunnel.NewServer(
-		tunnel.WithAddress(cfg.tunnelAddress),
-		tunnel.WithKeySeed(cfg.tunnelKeySeed),
-	)
-	if err != nil {
-		return fmt.Errorf("failed to create tunnel server: %w", err)
-	}
-
-	srvs := []transport.Server{httpSrv, tunnelSrv}
-	eg, ctx := errgroup.WithContext(ctx)
-
-	for _, srv := range srvs {
-		eg.Go(func() error {
-			return srv.Start(ctx)
-		})
-
-		eg.Go(func() error {
-			<-ctx.Done()
-
-			stopCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-			defer cancel()
-			return srv.Stop(stopCtx)
-		})
-	}
-
-	return eg.Wait()
 }

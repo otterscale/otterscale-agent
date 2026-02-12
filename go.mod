@@ -51,7 +51,6 @@ require (
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/jpillora/ansi v1.0.3 // indirect
-	github.com/jpillora/backoff v1.0.0 // indirect
 	github.com/jpillora/requestlog v1.0.0 // indirect
 	github.com/jpillora/sizestr v1.0.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
