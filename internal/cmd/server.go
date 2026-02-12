@@ -1,72 +1,47 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
-	"log/slog"
+	"time"
 
-	"connectrpc.com/authn"
-	"connectrpc.com/connect"
-	"connectrpc.com/otelconnect"
+	"github.com/spf13/cobra"
+	"golang.org/x/sync/errgroup"
+
 	"github.com/otterscale/otterscale-agent/internal/config"
 	"github.com/otterscale/otterscale-agent/internal/core"
+	"github.com/otterscale/otterscale-agent/internal/middleware"
 	"github.com/otterscale/otterscale-agent/internal/mux"
-	"github.com/spf13/cobra"
+	"github.com/otterscale/otterscale-agent/internal/transport"
+	"github.com/otterscale/otterscale-agent/internal/transport/http"
+	"github.com/otterscale/otterscale-agent/internal/transport/tunnel"
 )
 
-// ServerDeps holds the dependencies that are only needed by the server subcommand.
-// These are created lazily (via ServerDepsFactory) so that running `otterscale agent`
-// does not trigger their initialization (e.g. chisel tunnel server).
-type ServerDeps struct {
-	Hub            *mux.Hub
-	Tunnel         core.TunnelProvider
-	AuthMiddleware *authn.Middleware
-}
-
-// NewServerDeps is a Wire provider that assembles the ServerDeps struct.
-func NewServerDeps(hub *mux.Hub, tunnel core.TunnelProvider, authMiddleware *authn.Middleware) *ServerDeps {
-	return &ServerDeps{Hub: hub, Tunnel: tunnel, AuthMiddleware: authMiddleware}
-}
-
-// ServerDepsFactory creates server-specific dependencies on demand.
-type ServerDepsFactory func() (*ServerDeps, func(), error)
+type ServerInjector func() (*Server, func(), error)
 
 // TODO: replicated server
-func NewServer(conf *config.Config, factory ServerDepsFactory, interceptors ...connect.Interceptor) (*cobra.Command, error) {
+func NewServerCommand(conf *config.Config, newServer ServerInjector) (*cobra.Command, error) {
 	cmd := &cobra.Command{
 		Use:     "server",
 		Short:   "Start server that provides gRPC and HTTP endpoints for the core services",
 		Example: "otterscale server --address=:8299 --tunnel-address=127.0.0.1:8300",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			// Initialize server-specific dependencies only when the server
-			// subcommand actually runs, avoiding eager chisel initialization.
-			deps, cleanup, err := factory()
+			srv, cleanup, err := newServer()
 			if err != nil {
-				return fmt.Errorf("failed to initialize server dependencies: %w", err)
+				return fmt.Errorf("failed to initialize server: %w", err)
 			}
 			defer cleanup()
 
-			var (
-				address        = conf.ServerAddress()
-				allowedOrigins = conf.ServerAllowedOrigins()
-				tunnelAddress  = conf.ServerTunnelAddress()
-			)
-
-			slog.Info("Starting tunnel server", "address", tunnelAddress)
-			if err := deps.Tunnel.Start(tunnelAddress); err != nil {
-				return fmt.Errorf("failed to start tunnel server: %w", err)
+			cfg := serverConfig{
+				address:          conf.ServerAddress(),
+				allowedOrigins:   conf.ServerAllowedOrigins(),
+				tunnelAddress:    conf.ServerTunnelAddress(),
+				tunnelKeySeed:    conf.ServerTunnelKeySeed(),
+				keycloakRealmURL: conf.ServerKeycloakRealmURL(),
+				keycloakClientID: conf.ServerKeycloakClientID(),
 			}
 
-			if !conf.ServerDebugEnabled() {
-				openTelemetryInterceptor, err := otelconnect.NewInterceptor()
-				if err != nil {
-					return err
-				}
-
-				interceptors = append(interceptors, openTelemetryInterceptor)
-			}
-
-			slog.Info("Starting HTTP server", "address", address, "allowedOrigins", allowedOrigins)
-			return startHTTPServer(cmd.Context(), deps.Hub, deps.AuthMiddleware, address, allowedOrigins, connect.WithInterceptors(interceptors...))
+			return srv.Run(cmd.Context(), cfg)
 		},
 	}
 
@@ -75,4 +50,66 @@ func NewServer(conf *config.Config, factory ServerDepsFactory, interceptors ...c
 	}
 
 	return cmd, nil
+}
+
+type serverConfig struct {
+	address          string
+	allowedOrigins   []string
+	tunnelAddress    string
+	tunnelKeySeed    string
+	keycloakRealmURL string
+	keycloakClientID string
+}
+
+type Server struct {
+	hub    *mux.Hub
+	tunnel core.TunnelProvider
+}
+
+func NewServer(hub *mux.Hub, tunnel core.TunnelProvider) *Server {
+	return &Server{hub: hub, tunnel: tunnel}
+}
+
+func (s *Server) Run(ctx context.Context, cfg serverConfig) error {
+	oidc, err := middleware.NewOIDC(cfg.keycloakRealmURL, cfg.keycloakClientID)
+	if err != nil {
+		return fmt.Errorf("failed to create OIDC middleware: %w", err)
+	}
+
+	httpSrv, err := http.NewServer(
+		http.WithAddress(cfg.address),
+		http.WithMount(s.hub.RegisterHandlers),
+		http.WithAuthMiddleware(oidc),
+		http.WithAllowedOrigins(cfg.allowedOrigins),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create HTTP server: %w", err)
+	}
+
+	tunnelSrv, err := tunnel.NewServer(
+		tunnel.WithAddress(cfg.tunnelAddress),
+		tunnel.WithKeySeed(cfg.tunnelKeySeed),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create tunnel server: %w", err)
+	}
+
+	srvs := []transport.Server{httpSrv, tunnelSrv}
+	eg, ctx := errgroup.WithContext(ctx)
+
+	for _, srv := range srvs {
+		eg.Go(func() error {
+			return srv.Start(ctx)
+		})
+
+		eg.Go(func() error {
+			<-ctx.Done()
+
+			stopCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			return srv.Stop(stopCtx)
+		})
+	}
+
+	return eg.Wait()
 }

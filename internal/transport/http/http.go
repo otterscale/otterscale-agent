@@ -1,4 +1,4 @@
-package transport
+package http
 
 import (
 	"context"
@@ -58,21 +58,14 @@ func WithAllowedOrigins(origins []string) ServerOption {
 
 // NewServer creates a new HTTP server with the given options.
 func NewServer(opts ...ServerOption) (*Server, error) {
-	// Initialize Default Options
 	srv := &Server{
 		address: ":8299",
 	}
-
-	// Apply Functional Options
 	for _, opt := range opts {
 		opt(srv)
 	}
 
-	// Create the Root Mux
 	mux := http.NewServeMux()
-
-	// Mount handlers
-	// Execute the user-provided function to register routes onto the mux.
 	if srv.mount != nil {
 		if err := srv.mount(mux); err != nil {
 			return nil, err
