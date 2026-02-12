@@ -31,10 +31,18 @@ func WithKeySeed(keySeed string) ServerOption {
 	}
 }
 
+// WithServer configures the tunnel server.
+func WithServer(server *chserver.Server) ServerOption {
+	return func(o *Server) {
+		o.Server = server
+	}
+}
+
 // NewServer creates a new tunnel server with the given options.
 func NewServer(opts ...ServerOption) (*Server, error) {
 	srv := &Server{
 		address: ":8300",
+		Server:  &chserver.Server{},
 	}
 	for _, opt := range opts {
 		opt(srv)
@@ -50,7 +58,7 @@ func NewServer(opts ...ServerOption) (*Server, error) {
 		return nil, err
 	}
 
-	srv.Server = chServer
+	*srv.Server = *chServer
 	return srv, nil
 }
 
@@ -61,17 +69,17 @@ func (s *Server) Start(ctx context.Context) error {
 		return err
 	}
 
-	slog.Info("Tunnel starting on", "address", s.address)
+	slog.Info("Tunnel server starting on", "address", s.address)
 
-	if err := s.Server.StartContext(ctx, host, port); err != nil {
+	if err := s.StartContext(ctx, host, port); err != nil {
 		return err
 	}
 
-	return s.Server.Wait()
+	return s.Wait()
 }
 
 // Stop stops the tunnel server gracefully.
 func (s *Server) Stop(ctx context.Context) error {
 	slog.Info("Gracefully shutting down tunnel server...")
-	return s.Server.Close()
+	return s.Close()
 }
