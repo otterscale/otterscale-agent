@@ -2,6 +2,7 @@ package tunnel
 
 import (
 	"context"
+	"log/slog"
 	"net"
 
 	chserver "github.com/jpillora/chisel/server"
@@ -59,13 +60,18 @@ func (s *Server) Start(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+
+	slog.Info("Tunnel starting on", "address", s.address)
+
 	if err := s.Server.StartContext(ctx, host, port); err != nil {
 		return err
 	}
+
 	return s.Server.Wait()
 }
 
 // Stop stops the tunnel server gracefully.
 func (s *Server) Stop(ctx context.Context) error {
+	slog.Info("Gracefully shutting down tunnel server...")
 	return s.Server.Close()
 }

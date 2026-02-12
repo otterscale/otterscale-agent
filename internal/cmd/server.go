@@ -9,7 +9,6 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/otterscale/otterscale-agent/internal/config"
-	"github.com/otterscale/otterscale-agent/internal/core"
 	"github.com/otterscale/otterscale-agent/internal/middleware"
 	"github.com/otterscale/otterscale-agent/internal/mux"
 	"github.com/otterscale/otterscale-agent/internal/transport"
@@ -62,12 +61,11 @@ type serverConfig struct {
 }
 
 type Server struct {
-	hub    *mux.Hub
-	tunnel core.TunnelProvider
+	hub *mux.Hub
 }
 
-func NewServer(hub *mux.Hub, tunnel core.TunnelProvider) *Server {
-	return &Server{hub: hub, tunnel: tunnel}
+func NewServer(hub *mux.Hub) *Server {
+	return &Server{hub: hub}
 }
 
 func (s *Server) Run(ctx context.Context, cfg serverConfig) error {
