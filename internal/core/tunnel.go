@@ -1,8 +1,9 @@
 package core
 
+import chserver "github.com/jpillora/chisel/server"
+
 type TunnelProvider interface {
-	Start(address string) error
+	Server() *chserver.Server
 	RegisterCluster(cluster, user, pass string, tunnelPort int) error
-	GetTunnelAddress(cluster string) (string, error)
-	GetFingerprint() string
+	ResolveAddress(cluster string) (string, error)
 }

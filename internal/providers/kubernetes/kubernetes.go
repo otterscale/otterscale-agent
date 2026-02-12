@@ -2,12 +2,11 @@ package kubernetes
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"sync"
 
 	"connectrpc.com/authn"
-	"connectrpc.com/connect"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/rest"
 
 	"github.com/otterscale/otterscale-agent/internal/core"
@@ -27,12 +26,12 @@ func New(tunnel core.TunnelProvider) *Kubernetes {
 func (k *Kubernetes) impersonationConfig(ctx context.Context, cluster string) (*rest.Config, error) {
 	userInfo, ok := authn.GetInfo(ctx).(core.UserInfo)
 	if !ok {
-		return nil, connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("user info not found in context"))
+		return nil, apierrors.NewUnauthorized("user info not found in context")
 	}
 
-	address, err := k.tunnel.GetTunnelAddress(cluster)
+	address, err := k.tunnel.ResolveAddress(cluster)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeUnavailable, fmt.Errorf("tunnel unavailable: %w", err))
+		return nil, apierrors.NewServiceUnavailable(err.Error())
 	}
 
 	cfg := &rest.Config{
@@ -51,7 +50,7 @@ func (k *Kubernetes) impersonationConfig(ctx context.Context, cluster string) (*
 	} else {
 		t, err := rest.TransportFor(&rest.Config{Host: address})
 		if err != nil {
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to create transport for cluster %s: %w", cluster, err))
+			return nil, apierrors.NewInternalError(err)
 		}
 		actual, _ := k.transports.LoadOrStore(cluster, t)
 		cfg.Transport = actual.(http.RoundTripper)

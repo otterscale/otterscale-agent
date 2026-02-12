@@ -3,13 +3,13 @@ package app
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/structpb"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -37,7 +37,7 @@ func NewResourceService(resource *core.ResourceUseCase) *ResourceService {
 var _ pbconnect.ResourceServiceHandler = (*ResourceService)(nil)
 
 func (s *ResourceService) Discovery(ctx context.Context, req *pb.DiscoveryRequest) (*pb.DiscoveryResponse, error) {
-	apiResources, err := s.resource.GetServerResources(ctx, req.GetCluster())
+	apiResources, err := s.resource.ServerResources(ctx, req.GetCluster())
 	if err != nil {
 		return nil, k8sErrorToConnectError(err)
 	}
@@ -129,7 +129,7 @@ func (s *ResourceService) Watch(ctx context.Context, req *pb.WatchRequest, strea
 
 		case event, ok := <-watcher.ResultChan():
 			if !ok {
-				return connect.NewError(connect.CodeUnavailable, fmt.Errorf("watch closed"))
+				return apierrors.NewServiceUnavailable("watch closed")
 			}
 
 			msg, ok := s.processEvent(event)

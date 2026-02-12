@@ -52,7 +52,7 @@ func (d *discoveryClient) LookupResource(ctx context.Context, cluster, group, ve
 	return schema.GroupVersionResource{}, apierrors.NewBadRequest(fmt.Sprintf("unable to recognize resource %s", gvr))
 }
 
-func (d *discoveryClient) GetServerResources(ctx context.Context, cluster string) ([]*metav1.APIResourceList, error) {
+func (d *discoveryClient) ServerResources(ctx context.Context, cluster string) ([]*metav1.APIResourceList, error) {
 	client, err := d.client(ctx, cluster)
 	if err != nil {
 		return nil, err
@@ -79,7 +79,7 @@ func (d *discoveryClient) ResolveSchema(ctx context.Context, cluster, group, ver
 	return resolver.ResolveSchema(gvk)
 }
 
-func (d *discoveryClient) GetServerVersion(ctx context.Context, cluster string) (*version.Info, error) {
+func (d *discoveryClient) ServerVersion(ctx context.Context, cluster string) (*version.Info, error) {
 	client, err := d.client(ctx, cluster)
 	if err != nil {
 		return nil, err

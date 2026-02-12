@@ -21,9 +21,9 @@ import (
 
 type DiscoveryClient interface {
 	LookupResource(ctx context.Context, cluster, group, version, resource string) (schema.GroupVersionResource, error)
-	GetServerResources(ctx context.Context, cluster string) ([]*metav1.APIResourceList, error)
+	ServerResources(ctx context.Context, cluster string) ([]*metav1.APIResourceList, error)
 	ResolveSchema(ctx context.Context, cluster, group, version, kind string) (*spec.Schema, error)
-	GetServerVersion(ctx context.Context, cluster string) (*version.Info, error)
+	ServerVersion(ctx context.Context, cluster string) (*version.Info, error)
 }
 
 type ResourceRepo interface {
@@ -57,8 +57,8 @@ func NewResourceUseCase(discovery DiscoveryClient, resource ResourceRepo) *Resou
 	}
 }
 
-func (uc *ResourceUseCase) GetServerResources(ctx context.Context, cluster string) ([]*metav1.APIResourceList, error) {
-	return uc.discovery.GetServerResources(ctx, cluster)
+func (uc *ResourceUseCase) ServerResources(ctx context.Context, cluster string) ([]*metav1.APIResourceList, error) {
+	return uc.discovery.ServerResources(ctx, cluster)
 }
 
 func (uc *ResourceUseCase) ResolveSchema(ctx context.Context, cluster, group, version, kind string) (*spec.Schema, error) {
@@ -208,7 +208,7 @@ func (uc *ResourceUseCase) cleanObject(obj *unstructured.Unstructured) {
 }
 
 func (uc *ResourceUseCase) watchListFeature(ctx context.Context, cluster string) (bool, error) {
-	version, err := uc.discovery.GetServerVersion(ctx, cluster)
+	version, err := uc.discovery.ServerVersion(ctx, cluster)
 	if err != nil {
 		return false, err
 	}
