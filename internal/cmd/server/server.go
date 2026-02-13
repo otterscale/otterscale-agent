@@ -7,25 +7,29 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
+	"os"
+	"path/filepath"
 
 	fleetv1 "github.com/otterscale/otterscale-agent/api/fleet/v1/pbconnect"
 	"github.com/otterscale/otterscale-agent/internal/middleware"
+	"github.com/otterscale/otterscale-agent/internal/pki"
 	"github.com/otterscale/otterscale-agent/internal/providers/chisel"
 	"github.com/otterscale/otterscale-agent/internal/transport"
 	"github.com/otterscale/otterscale-agent/internal/transport/http"
 	"github.com/otterscale/otterscale-agent/internal/transport/tunnel"
 )
 
-// defaultKeySeed is the insecure placeholder that ships in config
+// defaultCASeed is the insecure placeholder that ships in config
 // defaults. The server refuses to start if it is still in use.
-const defaultKeySeed = "change-me"
+const defaultCASeed = "change-me"
 
 // Config holds the runtime parameters for a Server.
 type Config struct {
 	Address          string
 	AllowedOrigins   []string
 	TunnelAddress    string
-	TunnelKeySeed    string
+	TunnelCASeed     string
 	KeycloakRealmURL string
 	KeycloakClientID string
 }
@@ -49,14 +53,52 @@ func NewServer(handler *Handler, tunnel *chisel.Service) *Server {
 // is cancelled or an unrecoverable error occurs. Health, reflection,
 // and fleet-registration endpoints are marked as public (no auth).
 func (s *Server) Run(ctx context.Context, cfg Config) error {
-	if cfg.TunnelKeySeed == defaultKeySeed {
-		return errors.New("refusing to start: tunnel key seed is the insecure default \"change-me\"; " +
-			"set --tunnel-key-seed or OTTERSCALE_SERVER_TUNNEL_KEY_SEED to a unique secret")
+	if cfg.TunnelCASeed == defaultCASeed {
+		return errors.New("refusing to start: tunnel CA seed is the insecure default \"change-me\"; " +
+			"set --tunnel-ca-seed or OTTERSCALE_SERVER_TUNNEL_CA_SEED to a unique secret")
 	}
 
-	// Warn about unauthenticated fleet registration endpoint.
-	slog.Warn("fleet Register endpoint is publicly accessible without authentication; " +
-		"consider adding a pre-shared token or mTLS for agent registration in production")
+	// Initialize CA from seed and inject into the tunnel provider.
+	ca, err := pki.NewCAFromSeed(cfg.TunnelCASeed)
+	if err != nil {
+		return fmt.Errorf("failed to create CA: %w", err)
+	}
+	s.tunnel.SetCA(ca)
+
+	// Generate a server TLS certificate signed by the CA. Parse the
+	// tunnel address to extract the host for the certificate SAN.
+	tunnelHost, _, err := net.SplitHostPort(cfg.TunnelAddress)
+	if err != nil {
+		return fmt.Errorf("parse tunnel address %q: %w", cfg.TunnelAddress, err)
+	}
+	serverCert, serverKey, err := ca.GenerateServerCert(tunnelHost)
+	if err != nil {
+		return fmt.Errorf("failed to generate server cert: %w", err)
+	}
+
+	// Write CA cert, server cert, and server key to a temp directory
+	// so chisel can load them via file paths.
+	certDir, err := os.MkdirTemp("", "otterscale-tls-server-*")
+	if err != nil {
+		return fmt.Errorf("create cert dir: %w", err)
+	}
+	defer os.RemoveAll(certDir)
+
+	caFile := filepath.Join(certDir, "ca.pem")
+	certFile := filepath.Join(certDir, "cert.pem")
+	keyFile := filepath.Join(certDir, "key.pem")
+
+	if err := os.WriteFile(caFile, ca.CertPEM(), 0600); err != nil {
+		return fmt.Errorf("write CA cert: %w", err)
+	}
+	if err := os.WriteFile(certFile, serverCert, 0600); err != nil {
+		return fmt.Errorf("write server cert: %w", err)
+	}
+	if err := os.WriteFile(keyFile, serverKey, 0600); err != nil {
+		return fmt.Errorf("write server key: %w", err)
+	}
+
+	slog.Info("tunnel CA initialized", "subject", "otterscale-ca")
 
 	oidc, err := middleware.NewOIDC(cfg.KeycloakRealmURL, cfg.KeycloakClientID)
 	if err != nil {
@@ -81,7 +123,9 @@ func (s *Server) Run(ctx context.Context, cfg Config) error {
 
 	tunnelSrv, err := tunnel.NewServer(
 		tunnel.WithAddress(cfg.TunnelAddress),
-		tunnel.WithKeySeed(cfg.TunnelKeySeed),
+		tunnel.WithTLSCert(certFile),
+		tunnel.WithTLSKey(keyFile),
+		tunnel.WithTLSCA(caFile),
 		tunnel.WithServer(s.tunnel.Server()),
 	)
 	if err != nil {

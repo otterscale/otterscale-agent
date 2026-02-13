@@ -5,9 +5,11 @@ package agent
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/otterscale/otterscale-agent/internal/core"
+	"github.com/otterscale/otterscale-agent/internal/pki"
 	"github.com/otterscale/otterscale-agent/internal/transport"
 	"github.com/otterscale/otterscale-agent/internal/transport/http"
 	"github.com/otterscale/otterscale-agent/internal/transport/pipe"
@@ -19,7 +21,6 @@ type Config struct {
 	Cluster         string
 	ServerURL       string
 	TunnelServerURL string
-	TunnelTimeout   time.Duration
 }
 
 // Agent binds a local HTTP reverse-proxy to a dynamically allocated
@@ -59,7 +60,7 @@ func (a *Agent) Run(ctx context.Context, cfg Config) error {
 		tunnel.WithTunnelServerURL(cfg.TunnelServerURL),
 		tunnel.WithCluster(cfg.Cluster),
 		tunnel.WithLocalPort(bridge.Port()),
-		tunnel.WithKeepAlive(cfg.TunnelTimeout),
+		tunnel.WithKeepAlive(30*time.Second),
 		tunnel.WithMaxRetryCount(6),
 		tunnel.WithMaxRetryInterval(10*time.Second),
 		tunnel.WithRegister(a.register()),
@@ -70,14 +71,27 @@ func (a *Agent) Run(ctx context.Context, cfg Config) error {
 	return transport.Serve(ctx, httpSrv, bridge, tunnelClt)
 }
 
-// register wraps the register callback so that it returns the
-// endpoint, fingerprint, and auth needed by the tunnel client.
+// register wraps the TunnelConsumer so that it returns a
+// RegisterResult containing mTLS credentials and derived auth.
 func (a *Agent) register() tunnel.RegisterFunc {
-	return func(ctx context.Context, serverURL, cluster string) (endpoint, fingerprint, auth string, err error) {
+	return func(ctx context.Context, serverURL, cluster string) (*tunnel.RegisterResult, error) {
 		reg, err := a.tunnel.Register(ctx, serverURL, cluster)
 		if err != nil {
-			return "", "", "", err
+			return nil, err
 		}
-		return reg.Endpoint, reg.Fingerprint, reg.Auth, nil
+
+		// Derive the chisel auth string from the signed
+		// certificate. This must match the password the server
+		// computed when it signed the same certificate.
+		agentID, _ := os.Hostname()
+		auth := pki.DeriveAuth(agentID, reg.Certificate)
+
+		return &tunnel.RegisterResult{
+			Endpoint:  reg.Endpoint,
+			Auth:      auth,
+			CACertPEM: reg.CACertificate,
+			CertPEM:   reg.Certificate,
+			KeyPEM:    a.tunnel.PrivateKeyPEM(),
+		}, nil
 	}
 }

@@ -33,7 +33,7 @@ func NewServerCommand(conf *config.Config, newServer ServerInjector) (*cobra.Com
 				Address:          conf.ServerAddress(),
 				AllowedOrigins:   conf.ServerAllowedOrigins(),
 				TunnelAddress:    conf.ServerTunnelAddress(),
-				TunnelKeySeed:    conf.ServerTunnelKeySeed(),
+				TunnelCASeed:     conf.ServerTunnelCASeed(),
 				KeycloakRealmURL: conf.ServerKeycloakRealmURL(),
 				KeycloakClientID: conf.ServerKeycloakClientID(),
 			}

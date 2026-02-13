@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -15,17 +17,35 @@ import (
 var (
 	ErrLocalPortRequired = errors.New("tunnel: local port is required")
 	ErrRegisterRequired  = errors.New("tunnel: register function is required")
-	ErrEmptyFingerprint  = errors.New("tunnel: server returned empty fingerprint")
 )
 
-// RegisterFunc registers an agent to the fleet and returns endpoint credentials.
-type RegisterFunc func(ctx context.Context, serverURL, cluster string) (endpoint, fingerprint, auth string, err error)
+// RegisterResult holds the mTLS credentials and tunnel endpoint
+// returned by a successful registration.
+type RegisterResult struct {
+	// Endpoint is the tunnel server's allocated address (host:port).
+	Endpoint string
+	// Auth is the chisel auth string ("user:password") derived from
+	// the signed certificate.
+	Auth string
+	// CACertPEM is the PEM-encoded CA certificate for verifying the
+	// tunnel server.
+	CACertPEM []byte
+	// CertPEM is the PEM-encoded client certificate signed by the CA.
+	CertPEM []byte
+	// KeyPEM is the PEM-encoded private key corresponding to the
+	// client certificate.
+	KeyPEM []byte
+}
+
+// RegisterFunc registers an agent and returns mTLS credentials.
+type RegisterFunc func(ctx context.Context, serverURL, cluster string) (*RegisterResult, error)
 
 // ClientOption configures a Client.
 type ClientOption func(*Client)
 
 // Client manages a reverse tunnel connection with automatic
-// registration, reconnection, and exponential backoff.
+// registration, reconnection, and exponential backoff. It uses mTLS
+// for tunnel authentication.
 type Client struct {
 	inner            *chclient.Client // owned lifecycle, not exported
 	cluster          string
@@ -39,6 +59,7 @@ type Client struct {
 	maxRetryDelay    time.Duration
 	register         RegisterFunc
 	log              *slog.Logger
+	certDir          string // temp directory for TLS cert files
 }
 
 // WithCluster configures the cluster name used for registration.
@@ -103,7 +124,7 @@ func NewClient(opts ...ClientOption) (*Client, error) {
 	c := &Client{
 		cluster:          "default",
 		serverURL:        "http://127.0.0.1:8299",
-		tunnelServerURL:  "http://127.0.0.1:8300",
+		tunnelServerURL:  "https://127.0.0.1:8300",
 		keepAlive:        30 * time.Second,
 		maxRetryCount:    3,
 		maxRetryInterval: 10 * time.Second,
@@ -170,8 +191,12 @@ func (c *Client) Start(ctx context.Context) error {
 	}
 }
 
-// Stop gracefully shuts down the tunnel client.
+// Stop gracefully shuts down the tunnel client and cleans up temp files.
 func (c *Client) Stop(_ context.Context) error {
+	if c.certDir != "" {
+		_ = os.RemoveAll(c.certDir)
+		c.certDir = ""
+	}
 	if c.inner == nil {
 		return nil
 	}
@@ -179,24 +204,51 @@ func (c *Client) Stop(_ context.Context) error {
 	return c.inner.Close()
 }
 
-// dial registers with the fleet server and creates a new chisel client.
+// dial registers with the fleet server, writes mTLS credentials to
+// temp files, and creates a new chisel client configured for mTLS.
 func (c *Client) dial(ctx context.Context) (*chclient.Client, error) {
-	endpoint, fingerprint, auth, err := c.register(ctx, c.serverURL, c.cluster)
+	result, err := c.register(ctx, c.serverURL, c.cluster)
 	if err != nil {
 		return nil, fmt.Errorf("register: %w", err)
 	}
 
-	c.log.Info("registered", "endpoint", endpoint, "fingerprint", fingerprint)
+	c.log.Info("registered", "endpoint", result.Endpoint)
 
-	if fingerprint == "" {
-		return nil, ErrEmptyFingerprint
+	// Write mTLS credentials to a temp directory. Clean up old
+	// ones first (from a previous registration attempt).
+	if c.certDir != "" {
+		_ = os.RemoveAll(c.certDir)
+	}
+
+	dir, err := os.MkdirTemp("", "otterscale-tls-*")
+	if err != nil {
+		return nil, fmt.Errorf("create cert dir: %w", err)
+	}
+	c.certDir = dir
+
+	caFile := filepath.Join(dir, "ca.pem")
+	certFile := filepath.Join(dir, "cert.pem")
+	keyFile := filepath.Join(dir, "key.pem")
+
+	if err := os.WriteFile(caFile, result.CACertPEM, 0600); err != nil {
+		return nil, fmt.Errorf("write CA cert: %w", err)
+	}
+	if err := os.WriteFile(certFile, result.CertPEM, 0600); err != nil {
+		return nil, fmt.Errorf("write client cert: %w", err)
+	}
+	if err := os.WriteFile(keyFile, result.KeyPEM, 0600); err != nil {
+		return nil, fmt.Errorf("write client key: %w", err)
 	}
 
 	return chclient.NewClient(&chclient.Config{
-		Server:           c.tunnelServerURL,
-		Fingerprint:      fingerprint,
-		Auth:             auth,
-		Remotes:          []string{fmt.Sprintf("R:%s:127.0.0.1:%d", endpoint, c.localPort)},
+		Server: c.tunnelServerURL,
+		Auth:   result.Auth,
+		TLS: chclient.TLSConfig{
+			CA:   caFile,
+			Cert: certFile,
+			Key:  keyFile,
+		},
+		Remotes:          []string{fmt.Sprintf("R:%s:127.0.0.1:%d", result.Endpoint, c.localPort)},
 		KeepAlive:        c.keepAlive,
 		MaxRetryCount:    c.maxRetryCount,
 		MaxRetryInterval: c.maxRetryInterval,

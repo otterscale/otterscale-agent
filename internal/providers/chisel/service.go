@@ -17,6 +17,7 @@ import (
 	chserver "github.com/jpillora/chisel/server"
 
 	"github.com/otterscale/otterscale-agent/internal/core"
+	"github.com/otterscale/otterscale-agent/internal/pki"
 )
 
 // tunnelPort is the fixed port shared by all cluster tunnels.
@@ -36,6 +37,7 @@ type clusterEntry struct {
 // underlying chisel server via Server() for transport-layer init.
 type Service struct {
 	server *chserver.Server
+	ca     *pki.CA
 	log    *slog.Logger
 
 	mu        sync.RWMutex
@@ -66,10 +68,20 @@ func (s *Service) Server() *chserver.Server {
 	return s.server
 }
 
-// Fingerprint returns the TLS fingerprint of the tunnel server so
-// that agents can verify server identity without a CA.
-func (s *Service) Fingerprint() string {
-	return s.server.GetFingerprint()
+// SetCA injects the CA used to sign agent CSRs and to report the CA
+// certificate. This is called during server startup, before any
+// registrations occur.
+func (s *Service) SetCA(ca *pki.CA) {
+	s.ca = ca
+}
+
+// CACertPEM returns the PEM-encoded CA certificate so that agents
+// can verify the tunnel server's identity via mTLS.
+func (s *Service) CACertPEM() []byte {
+	if s.ca == nil {
+		return nil
+	}
+	return s.ca.CertPEM()
 }
 
 // ListClusters returns the names of all currently registered clusters.
@@ -80,20 +92,36 @@ func (s *Service) ListClusters() []string {
 	return slices.Collect(maps.Keys(s.clusters))
 }
 
-// RegisterCluster associates a cluster with a unique loopback host,
-// creates a chisel user with credentials (user/pass), and returns the
-// tunnel endpoint (host:port).
+// RegisterCluster validates and signs the agent's CSR, associates a
+// cluster with a unique loopback host, creates a chisel user with a
+// password derived from the signed certificate, and returns the
+// tunnel endpoint and the PEM-encoded signed certificate.
 //
-// If the cluster was previously registered, the old host allocation is
-// released so that re-registration always moves the cluster to a fresh
-// address.
-func (s *Service) RegisterCluster(cluster, user, pass string) (string, error) {
+// If the cluster was previously registered, the old host allocation
+// is released so that re-registration always moves the cluster to a
+// fresh address.
+func (s *Service) RegisterCluster(cluster, agentID string, csrPEM []byte) (string, []byte, error) {
+	if s.ca == nil {
+		return "", nil, fmt.Errorf("CA not initialized")
+	}
+
+	// Sign the agent's CSR with the internal CA.
+	certPEM, err := s.ca.SignCSR(csrPEM)
+	if err != nil {
+		return "", nil, fmt.Errorf("sign CSR: %w", err)
+	}
+
+	// Derive the chisel password from the signed certificate so
+	// that both server and agent can compute it independently.
+	auth := pki.DeriveAuth(agentID, certPEM)
+	_, pass, _ := parseAuth(auth)
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	host, err := s.allocateHost(cluster)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 
 	// Remove the previous user and host for this cluster, if any,
@@ -107,17 +135,17 @@ func (s *Service) RegisterCluster(cluster, user, pass string) (string, error) {
 	// host:port combination. The regex anchors prevent the agent
 	// from binding arbitrary endpoints.
 	allowed := fmt.Sprintf("^R:%s:%d(:.*)?$", regexp.QuoteMeta(host), tunnelPort)
-	if err := s.server.AddUser(user, pass, allowed); err != nil {
+	if err := s.server.AddUser(agentID, pass, allowed); err != nil {
 		s.releaseHost(host)
-		return "", err
+		return "", nil, err
 	}
 
 	s.clusters[cluster] = &clusterEntry{
 		host: host,
-		user: user,
+		user: agentID,
 	}
 
-	return fmt.Sprintf("%s:%d", host, tunnelPort), nil
+	return fmt.Sprintf("%s:%d", host, tunnelPort), certPEM, nil
 }
 
 // DeregisterCluster removes a cluster's tunnel allocation, deleting
@@ -189,4 +217,14 @@ func hostFromIndex(v uint32) string {
 	b := byte((v>>8)%254 + 1)
 	c := byte(v%254 + 1)
 	return fmt.Sprintf("127.%d.%d.%d", a, b, c)
+}
+
+// parseAuth splits a "user:pass" string into its components.
+func parseAuth(auth string) (user, pass string, ok bool) {
+	for i := range auth {
+		if auth[i] == ':' {
+			return auth[:i], auth[i+1:], true
+		}
+	}
+	return auth, "", false
 }

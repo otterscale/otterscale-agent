@@ -102,10 +102,10 @@ func (c *Config) ServerTunnelAddress() string {
 	return c.v.GetString(keyServerTunnelAddress)
 }
 
-// ServerTunnelKeySeed returns the deterministic key seed used to
-// generate the tunnel server's TLS key pair.
-func (c *Config) ServerTunnelKeySeed() string {
-	return c.v.GetString(keyServerTunnelKeySeed)
+// ServerTunnelCASeed returns the seed used to generate the internal
+// CA for mTLS certificate issuance to agents.
+func (c *Config) ServerTunnelCASeed() string {
+	return c.v.GetString(keyServerTunnelCASeed)
 }
 
 // ServerKeycloakRealmURL returns the Keycloak realm issuer URL used
@@ -139,10 +139,4 @@ func (c *Config) AgentServerURL() string {
 // connects to.
 func (c *Config) AgentTunnelServerURL() string {
 	return c.v.GetString(keyAgentTunnelServerURL)
-}
-
-// AgentTunnelTimeout returns the keep-alive interval for the tunnel
-// connection.
-func (c *Config) AgentTunnelTimeout() time.Duration {
-	return c.v.GetDuration(keyAgentTunnelTimeout)
 }

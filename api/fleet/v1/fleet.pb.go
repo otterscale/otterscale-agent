@@ -124,11 +124,13 @@ func (b0 ListClustersResponse_builder) Build() *ListClustersResponse {
 	return m0
 }
 
-// RegisterRequest contains the agent's cluster identity and tunnel port.
+// RegisterRequest contains the agent's cluster identity and a CSR for
+// mTLS certificate issuance.
 type RegisterRequest struct {
 	state                  protoimpl.MessageState `protogen:"opaque.v1"`
 	xxx_hidden_Cluster     *string                `protobuf:"bytes,1,opt,name=cluster"`
 	xxx_hidden_AgentId     *string                `protobuf:"bytes,2,opt,name=agent_id,json=agentId"`
+	xxx_hidden_Csr         []byte                 `protobuf:"bytes,3,opt,name=csr"`
 	XXX_raceDetectHookData protoimpl.RaceDetectHookData
 	XXX_presence           [1]uint32
 	unknownFields          protoimpl.UnknownFields
@@ -180,14 +182,29 @@ func (x *RegisterRequest) GetAgentId() string {
 	return ""
 }
 
+func (x *RegisterRequest) GetCsr() []byte {
+	if x != nil {
+		return x.xxx_hidden_Csr
+	}
+	return nil
+}
+
 func (x *RegisterRequest) SetCluster(v string) {
 	x.xxx_hidden_Cluster = &v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 0, 2)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 0, 3)
 }
 
 func (x *RegisterRequest) SetAgentId(v string) {
 	x.xxx_hidden_AgentId = &v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 1, 2)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 1, 3)
+}
+
+func (x *RegisterRequest) SetCsr(v []byte) {
+	if v == nil {
+		v = []byte{}
+	}
+	x.xxx_hidden_Csr = v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 2, 3)
 }
 
 func (x *RegisterRequest) HasCluster() bool {
@@ -204,6 +221,13 @@ func (x *RegisterRequest) HasAgentId() bool {
 	return protoimpl.X.Present(&(x.XXX_presence[0]), 1)
 }
 
+func (x *RegisterRequest) HasCsr() bool {
+	if x == nil {
+		return false
+	}
+	return protoimpl.X.Present(&(x.XXX_presence[0]), 2)
+}
+
 func (x *RegisterRequest) ClearCluster() {
 	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 0)
 	x.xxx_hidden_Cluster = nil
@@ -214,6 +238,11 @@ func (x *RegisterRequest) ClearAgentId() {
 	x.xxx_hidden_AgentId = nil
 }
 
+func (x *RegisterRequest) ClearCsr() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 2)
+	x.xxx_hidden_Csr = nil
+}
+
 type RegisterRequest_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
@@ -221,6 +250,9 @@ type RegisterRequest_builder struct {
 	Cluster *string
 	// The agent identifier this agent uses to register with the server.
 	AgentId *string
+	// PEM-encoded PKCS#10 certificate signing request. The server signs
+	// this with its internal CA and returns the issued certificate.
+	Csr []byte
 }
 
 func (b0 RegisterRequest_builder) Build() *RegisterRequest {
@@ -228,26 +260,31 @@ func (b0 RegisterRequest_builder) Build() *RegisterRequest {
 	b, x := &b0, m0
 	_, _ = b, x
 	if b.Cluster != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 0, 2)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 0, 3)
 		x.xxx_hidden_Cluster = b.Cluster
 	}
 	if b.AgentId != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 1, 2)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 1, 3)
 		x.xxx_hidden_AgentId = b.AgentId
+	}
+	if b.Csr != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 2, 3)
+		x.xxx_hidden_Csr = b.Csr
 	}
 	return m0
 }
 
-// RegisterResponse contains the server's fingerprint for the agent to verify the connection.
+// RegisterResponse contains a CA-signed certificate and the CA
+// certificate so the agent can establish an mTLS tunnel connection.
 type RegisterResponse struct {
-	state                  protoimpl.MessageState `protogen:"opaque.v1"`
-	xxx_hidden_Endpoint    *string                `protobuf:"bytes,1,opt,name=endpoint"`
-	xxx_hidden_Fingerprint *string                `protobuf:"bytes,2,opt,name=fingerprint"`
-	xxx_hidden_Token       *string                `protobuf:"bytes,3,opt,name=token"`
-	XXX_raceDetectHookData protoimpl.RaceDetectHookData
-	XXX_presence           [1]uint32
-	unknownFields          protoimpl.UnknownFields
-	sizeCache              protoimpl.SizeCache
+	state                    protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Endpoint      *string                `protobuf:"bytes,1,opt,name=endpoint"`
+	xxx_hidden_Certificate   []byte                 `protobuf:"bytes,2,opt,name=certificate"`
+	xxx_hidden_CaCertificate []byte                 `protobuf:"bytes,3,opt,name=ca_certificate,json=caCertificate"`
+	XXX_raceDetectHookData   protoimpl.RaceDetectHookData
+	XXX_presence             [1]uint32
+	unknownFields            protoimpl.UnknownFields
+	sizeCache                protoimpl.SizeCache
 }
 
 func (x *RegisterResponse) Reset() {
@@ -285,24 +322,18 @@ func (x *RegisterResponse) GetEndpoint() string {
 	return ""
 }
 
-func (x *RegisterResponse) GetFingerprint() string {
+func (x *RegisterResponse) GetCertificate() []byte {
 	if x != nil {
-		if x.xxx_hidden_Fingerprint != nil {
-			return *x.xxx_hidden_Fingerprint
-		}
-		return ""
+		return x.xxx_hidden_Certificate
 	}
-	return ""
+	return nil
 }
 
-func (x *RegisterResponse) GetToken() string {
+func (x *RegisterResponse) GetCaCertificate() []byte {
 	if x != nil {
-		if x.xxx_hidden_Token != nil {
-			return *x.xxx_hidden_Token
-		}
-		return ""
+		return x.xxx_hidden_CaCertificate
 	}
-	return ""
+	return nil
 }
 
 func (x *RegisterResponse) SetEndpoint(v string) {
@@ -310,13 +341,19 @@ func (x *RegisterResponse) SetEndpoint(v string) {
 	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 0, 3)
 }
 
-func (x *RegisterResponse) SetFingerprint(v string) {
-	x.xxx_hidden_Fingerprint = &v
+func (x *RegisterResponse) SetCertificate(v []byte) {
+	if v == nil {
+		v = []byte{}
+	}
+	x.xxx_hidden_Certificate = v
 	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 1, 3)
 }
 
-func (x *RegisterResponse) SetToken(v string) {
-	x.xxx_hidden_Token = &v
+func (x *RegisterResponse) SetCaCertificate(v []byte) {
+	if v == nil {
+		v = []byte{}
+	}
+	x.xxx_hidden_CaCertificate = v
 	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 2, 3)
 }
 
@@ -327,14 +364,14 @@ func (x *RegisterResponse) HasEndpoint() bool {
 	return protoimpl.X.Present(&(x.XXX_presence[0]), 0)
 }
 
-func (x *RegisterResponse) HasFingerprint() bool {
+func (x *RegisterResponse) HasCertificate() bool {
 	if x == nil {
 		return false
 	}
 	return protoimpl.X.Present(&(x.XXX_presence[0]), 1)
 }
 
-func (x *RegisterResponse) HasToken() bool {
+func (x *RegisterResponse) HasCaCertificate() bool {
 	if x == nil {
 		return false
 	}
@@ -346,14 +383,14 @@ func (x *RegisterResponse) ClearEndpoint() {
 	x.xxx_hidden_Endpoint = nil
 }
 
-func (x *RegisterResponse) ClearFingerprint() {
+func (x *RegisterResponse) ClearCertificate() {
 	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 1)
-	x.xxx_hidden_Fingerprint = nil
+	x.xxx_hidden_Certificate = nil
 }
 
-func (x *RegisterResponse) ClearToken() {
+func (x *RegisterResponse) ClearCaCertificate() {
 	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 2)
-	x.xxx_hidden_Token = nil
+	x.xxx_hidden_CaCertificate = nil
 }
 
 type RegisterResponse_builder struct {
@@ -361,10 +398,10 @@ type RegisterResponse_builder struct {
 
 	// The loopback endpoint reserved for this cluster tunnel.
 	Endpoint *string
-	// The server's tunnel fingerprint, used by the agent to verify the connection.
-	Fingerprint *string
-	// The token for the agent to register with the server.
-	Token *string
+	// PEM-encoded X.509 certificate signed by the server's CA.
+	Certificate []byte
+	// PEM-encoded CA certificate for verifying the tunnel server.
+	CaCertificate []byte
 }
 
 func (b0 RegisterResponse_builder) Build() *RegisterResponse {
@@ -375,13 +412,13 @@ func (b0 RegisterResponse_builder) Build() *RegisterResponse {
 		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 0, 3)
 		x.xxx_hidden_Endpoint = b.Endpoint
 	}
-	if b.Fingerprint != nil {
+	if b.Certificate != nil {
 		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 1, 3)
-		x.xxx_hidden_Fingerprint = b.Fingerprint
+		x.xxx_hidden_Certificate = b.Certificate
 	}
-	if b.Token != nil {
+	if b.CaCertificate != nil {
 		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 2, 3)
-		x.xxx_hidden_Token = b.Token
+		x.xxx_hidden_CaCertificate = b.CaCertificate
 	}
 	return m0
 }
@@ -393,14 +430,15 @@ const file_api_fleet_v1_fleet_proto_rawDesc = "" +
 	"\x18api/fleet/v1/fleet.proto\x12\x13otterscale.fleet.v1\x1a\x15api/annotations.proto\"\x15\n" +
 	"\x13ListClustersRequest\"2\n" +
 	"\x14ListClustersResponse\x12\x1a\n" +
-	"\bclusters\x18\x01 \x03(\tR\bclusters\"F\n" +
+	"\bclusters\x18\x01 \x03(\tR\bclusters\"X\n" +
 	"\x0fRegisterRequest\x12\x18\n" +
 	"\acluster\x18\x01 \x01(\tR\acluster\x12\x19\n" +
-	"\bagent_id\x18\x02 \x01(\tR\aagentId\"f\n" +
+	"\bagent_id\x18\x02 \x01(\tR\aagentId\x12\x10\n" +
+	"\x03csr\x18\x03 \x01(\fR\x03csr\"w\n" +
 	"\x10RegisterResponse\x12\x1a\n" +
 	"\bendpoint\x18\x01 \x01(\tR\bendpoint\x12 \n" +
-	"\vfingerprint\x18\x02 \x01(\tR\vfingerprint\x12\x14\n" +
-	"\x05token\x18\x03 \x01(\tR\x05token2\xf8\x01\n" +
+	"\vcertificate\x18\x02 \x01(\fR\vcertificate\x12%\n" +
+	"\x0eca_certificate\x18\x03 \x01(\fR\rcaCertificate2\xf8\x01\n" +
 	"\fFleetService\x12y\n" +
 	"\fListClusters\x12(.otterscale.fleet.v1.ListClustersRequest\x1a).otterscale.fleet.v1.ListClustersResponse\"\x14\x8a\xdf\xd5\x1d\x0f\n" +
 	"\rfleet-enabled\x12m\n" +

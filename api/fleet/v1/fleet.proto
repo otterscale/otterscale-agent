@@ -37,23 +37,29 @@ message ListClustersResponse {
   repeated string clusters = 1;
 }
 
-// RegisterRequest contains the agent's cluster identity and tunnel port.
+// RegisterRequest contains the agent's cluster identity and a CSR for
+// mTLS certificate issuance.
 message RegisterRequest {
   // The cluster identifier this agent belongs to.
   string cluster = 1;
 
   // The agent identifier this agent uses to register with the server.
   string agent_id = 2;
+
+  // PEM-encoded PKCS#10 certificate signing request. The server signs
+  // this with its internal CA and returns the issued certificate.
+  bytes csr = 3;
 }
 
-// RegisterResponse contains the server's fingerprint for the agent to verify the connection.
+// RegisterResponse contains a CA-signed certificate and the CA
+// certificate so the agent can establish an mTLS tunnel connection.
 message RegisterResponse {
   // The loopback endpoint reserved for this cluster tunnel.
   string endpoint = 1;
 
-  // The server's tunnel fingerprint, used by the agent to verify the connection.
-  string fingerprint = 2;
+  // PEM-encoded X.509 certificate signed by the server's CA.
+  bytes certificate = 2;
 
-  // The token for the agent to register with the server.
-  string token = 3;
+  // PEM-encoded CA certificate for verifying the tunnel server.
+  bytes ca_certificate = 3;
 }

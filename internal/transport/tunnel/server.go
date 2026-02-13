@@ -13,12 +13,14 @@ import (
 // ServerOption configures a Server.
 type ServerOption func(*Server)
 
-// Server manages a chisel reverse-tunnel listener with TLS fingerprint
-// authentication and automatic user provisioning.
+// Server manages a chisel reverse-tunnel listener with mTLS
+// certificate authentication and automatic user provisioning.
 type Server struct {
 	inner   *chserver.Server // shared pointer; see WithServer
 	address string
-	keySeed string
+	tlsCert string // file path to server certificate
+	tlsKey  string // file path to server private key
+	tlsCA   string // file path to CA certificate (enables mTLS)
 	log     *slog.Logger
 }
 
@@ -27,9 +29,21 @@ func WithAddress(address string) ServerOption {
 	return func(s *Server) { s.address = address }
 }
 
-// WithKeySeed configures the deterministic key seed for the tunnel server.
-func WithKeySeed(keySeed string) ServerOption {
-	return func(s *Server) { s.keySeed = keySeed }
+// WithTLSCert configures the file path to the server TLS certificate.
+func WithTLSCert(path string) ServerOption {
+	return func(s *Server) { s.tlsCert = path }
+}
+
+// WithTLSKey configures the file path to the server TLS private key.
+func WithTLSKey(path string) ServerOption {
+	return func(s *Server) { s.tlsKey = path }
+}
+
+// WithTLSCA configures the file path to the CA certificate used to
+// verify client certificates. When set, the server requires and
+// validates client certificates (mTLS).
+func WithTLSCA(path string) ServerOption {
+	return func(s *Server) { s.tlsCA = path }
 }
 
 // WithServer injects a shared chisel server pointer. The pointer is
@@ -94,10 +108,20 @@ func (s *Server) Stop(_ context.Context) error {
 // pointer so that any TunnelProvider holding the same reference sees
 // the fully initialized instance.
 func (s *Server) init() error {
-	ch, err := chserver.NewServer(&chserver.Config{
+	cfg := &chserver.Config{
 		Reverse: true,
-		KeySeed: s.keySeed,
-	})
+	}
+
+	// Configure TLS for mTLS when certificate paths are provided.
+	if s.tlsCert != "" && s.tlsKey != "" {
+		cfg.TLS = chserver.TLSConfig{
+			Cert: s.tlsCert,
+			Key:  s.tlsKey,
+			CA:   s.tlsCA,
+		}
+	}
+
+	ch, err := chserver.NewServer(cfg)
 	if err != nil {
 		return err
 	}

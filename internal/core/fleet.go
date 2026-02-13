@@ -3,56 +3,52 @@
 // otterscale) implement the interfaces declared here.
 package core
 
-import (
-	"context"
-	"crypto/rand"
-	"encoding/base64"
-	"fmt"
-)
+import "context"
 
 // TunnelProvider is the server-side abstraction for managing reverse
-// tunnels. It allocates unique endpoints per cluster and provisions
-// tunnel users for each connecting agent.
+// tunnels. It allocates unique endpoints per cluster, signs agent
+// CSRs, and provisions tunnel users for each connecting agent.
 type TunnelProvider interface {
-	// Fingerprint returns the TLS fingerprint of the tunnel server
-	// so that agents can verify server identity without a CA.
-	Fingerprint() string
+	// CACertPEM returns the PEM-encoded CA certificate so that
+	// agents can verify the tunnel server and the server can
+	// configure mTLS.
+	CACertPEM() []byte
 	// ListClusters returns the names of all registered clusters.
 	ListClusters() []string
-	// RegisterCluster creates a tunnel user and returns the allocated
-	// endpoint.
-	RegisterCluster(cluster, user, pass string) (string, error)
+	// RegisterCluster validates and signs the agent's CSR, creates
+	// a tunnel user, and returns the allocated endpoint together
+	// with the PEM-encoded signed certificate.
+	RegisterCluster(cluster, agentID string, csrPEM []byte) (endpoint string, certPEM []byte, err error)
 	// ResolveAddress returns the HTTP base URL for the given cluster.
 	ResolveAddress(cluster string) (string, error)
 }
 
 // TunnelConsumer is the agent-side abstraction for registering with
-// the fleet server and obtaining tunnel credentials.
+// the fleet server and obtaining tunnel credentials via CSR/mTLS.
 type TunnelConsumer interface {
-	// Register calls the fleet API and returns the endpoint, TLS
-	// fingerprint, and authentication string for the tunnel.
+	// Register calls the fleet API with a CSR and returns the
+	// signed certificate, CA certificate, and tunnel endpoint.
 	Register(ctx context.Context, serverURL, cluster string) (Registration, error)
+	// PrivateKeyPEM returns the PEM-encoded private key that
+	// corresponds to the CSR sent during registration.
+	PrivateKeyPEM() []byte
 }
 
 // Registration holds the credentials and connection details returned
-// by the fleet server after a successful cluster registration.
+// by the fleet server after a successful CSR-based registration.
 type Registration struct {
-	// Endpoint is the tunnel server URL the agent should connect to.
+	// Endpoint is the tunnel endpoint the agent should connect to.
 	Endpoint string
-	// Fingerprint is the TLS fingerprint of the tunnel server, used
-	// by the agent to verify server identity without a CA.
-	Fingerprint string
-	// Auth is the base64-encoded "user:password" string used for
-	// tunnel authentication.
-	Auth string
-	// Token is the one-time token assigned to the agent during
-	// registration, used to authenticate with the tunnel server.
-	Token string
+	// Certificate is the PEM-encoded X.509 certificate signed by
+	// the server's CA, used for mTLS client authentication.
+	Certificate []byte
+	// CACertificate is the PEM-encoded CA certificate used to
+	// verify the tunnel server's identity.
+	CACertificate []byte
 }
 
 // FleetUseCase orchestrates cluster registration on the server side.
-// It generates one-time tokens for agents and delegates the actual
-// tunnel setup to the TunnelProvider.
+// It delegates CSR signing and tunnel setup to the TunnelProvider.
 type FleetUseCase struct {
 	tunnel TunnelProvider
 }
@@ -70,32 +66,17 @@ func (uc *FleetUseCase) ListClusters() []string {
 	return uc.tunnel.ListClusters()
 }
 
-// RegisterCluster generates a fresh token, registers the agent with
-// the tunnel provider, and returns the tunnel endpoint and the
-// authentication token.
-func (uc *FleetUseCase) RegisterCluster(cluster, agentID string) (Registration, error) {
-	token, err := uc.generateToken()
-	if err != nil {
-		return Registration{}, err
-	}
-	endpoint, err := uc.tunnel.RegisterCluster(cluster, agentID, token)
+// RegisterCluster forwards the agent's CSR to the tunnel provider for
+// signing, and returns the signed certificate, CA certificate, and
+// tunnel endpoint.
+func (uc *FleetUseCase) RegisterCluster(cluster, agentID string, csrPEM []byte) (Registration, error) {
+	endpoint, certPEM, err := uc.tunnel.RegisterCluster(cluster, agentID, csrPEM)
 	if err != nil {
 		return Registration{}, err
 	}
 	return Registration{
-		Endpoint:    endpoint,
-		Fingerprint: uc.tunnel.Fingerprint(),
-		Token:       token,
+		Endpoint:      endpoint,
+		Certificate:   certPEM,
+		CACertificate: uc.tunnel.CACertPEM(),
 	}, nil
-}
-
-// generateToken produces a 32-byte cryptographically random token
-// encoded as URL-safe base64 (no padding).
-func (uc *FleetUseCase) generateToken() (string, error) {
-	buf := make([]byte, 32)
-	_, err := rand.Read(buf)
-	if err != nil {
-		return "", fmt.Errorf("failed to generate random token: %w", err)
-	}
-	return base64.RawURLEncoding.EncodeToString(buf), nil
 }

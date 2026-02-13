@@ -55,7 +55,10 @@ func wireServer() (*server.Server, func(), error) {
 // registrar.
 func wireAgent() (*agent.Agent, func(), error) {
 	handler := agent.NewHandler()
-	tunnelConsumer := otterscale.NewFleetRegistrar()
+	tunnelConsumer, err := otterscale.NewFleetRegistrar()
+	if err != nil {
+		return nil, nil, err
+	}
 	agentAgent := agent.NewAgent(handler, tunnelConsumer)
 	return agentAgent, func() {
 	}, nil
