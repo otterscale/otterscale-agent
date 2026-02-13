@@ -109,14 +109,6 @@ func (c *Config) AgentTunnelServerURL() string {
 	return c.v.GetString(keyAgentTunnelServerURL) // OTTERSCALE_AGENT_TUNNEL_SERVER_URL
 }
 
-func (c *Config) AgentTunnelAuth() string {
-	return c.v.GetString(keyAgentTunnelAuth) // OTTERSCALE_AGENT_TUNNEL_AUTH
-}
-
-func (c *Config) AgentTunnelFingerprint() string {
-	return c.v.GetString(keyAgentTunnelFingerprint) // OTTERSCALE_AGENT_TUNNEL_FINGERPRINT
-}
-
 func (c *Config) AgentTunnelTimeout() time.Duration {
 	return c.v.GetDuration(keyAgentTunnelTimeout) // OTTERSCALE_AGENT_TUNNEL_TIMEOUT
 }

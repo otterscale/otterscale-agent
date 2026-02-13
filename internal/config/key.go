@@ -10,10 +10,8 @@ const (
 )
 
 const (
-	keyAgentCluster           = "agent.cluster"
-	keyAgentServerURL         = "agent.server_url"
-	keyAgentTunnelServerURL   = "agent.tunnel.server_url"
-	keyAgentTunnelFingerprint = "agent.tunnel.fingerprint"
-	keyAgentTunnelAuth        = "agent.tunnel.auth"
-	keyAgentTunnelTimeout     = "agent.tunnel.timeout"
+	keyAgentCluster         = "agent.cluster"
+	keyAgentServerURL       = "agent.server_url"
+	keyAgentTunnelServerURL = "agent.tunnel.server_url"
+	keyAgentTunnelTimeout   = "agent.tunnel.timeout"
 )

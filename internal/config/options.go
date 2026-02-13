@@ -25,8 +25,6 @@ var AgentOptions = []Option{
 	{Key: keyAgentCluster, Flag: toFlag(keyAgentCluster), Default: "default", Description: "Agent cluster"},
 	{Key: keyAgentServerURL, Flag: toFlag(keyAgentServerURL), Default: "http://127.0.0.1:8299", Description: "Agent control-plane server url"},
 	{Key: keyAgentTunnelServerURL, Flag: toFlag(keyAgentTunnelServerURL), Default: "http://127.0.0.1:8300", Description: "Agent tunnel server url"},
-	{Key: keyAgentTunnelFingerprint, Flag: toFlag(keyAgentTunnelFingerprint), Default: "", Description: "Agent tunnel fingerprint"},
-	{Key: keyAgentTunnelAuth, Flag: toFlag(keyAgentTunnelAuth), Default: "user:pass", Description: "Agent tunnel auth"},
 	{Key: keyAgentTunnelTimeout, Flag: toFlag(keyAgentTunnelTimeout), Default: 30 * time.Second, Description: "Agent tunnel timeout"},
 }
 
