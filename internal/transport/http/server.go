@@ -3,6 +3,7 @@ package http
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -13,171 +14,200 @@ import (
 	"github.com/rs/cors"
 )
 
-// MountFunc defines a function that registers handlers onto the provided ServeMux.
-// By passing *http.ServeMux, we allow the caller to register multiple services.
+// MountFunc registers handlers onto the provided ServeMux.
+// Accepting *http.ServeMux allows the caller to register multiple services.
 type MountFunc func(mux *http.ServeMux) error
 
-// Option defines a functional option for configuring the server.
+// ServerOption configures a Server.
 type ServerOption func(*Server)
 
+// Server is an HTTP/H2C server with optional CORS and authentication
+// middleware. It implements transport.Listener.
 type Server struct {
-	*http.Server
+	inner          *http.Server
 	address        string
 	mount          MountFunc
 	authMiddleware *authn.Middleware
 	publicPaths    map[string]struct{}
 	allowedOrigins []string
+	log            *slog.Logger
 }
 
-// WithAddress configures the server address.
+// WithAddress configures the listen address (e.g. ":8299").
 func WithAddress(address string) ServerOption {
-	return func(o *Server) {
-		o.address = address
-	}
+	return func(s *Server) { s.address = address }
 }
 
-// WithMount configures the mount function.
+// WithMount configures the function that registers route handlers.
 func WithMount(mount MountFunc) ServerOption {
-	return func(o *Server) {
-		o.mount = mount
-	}
+	return func(s *Server) { s.mount = mount }
 }
 
-// WithAuthMiddleware configures the server with an authentication middleware.
+// WithAuthMiddleware configures the authentication middleware.
 func WithAuthMiddleware(m *authn.Middleware) ServerOption {
-	return func(o *Server) {
-		o.authMiddleware = m
-	}
+	return func(s *Server) { s.authMiddleware = m }
 }
 
-// WithPublicPaths configures unauthenticated paths.
+// WithPublicPaths configures paths that bypass authentication.
 func WithPublicPaths(paths []string) ServerOption {
-	return func(o *Server) {
+	return func(s *Server) {
 		if len(paths) == 0 {
 			return
 		}
-		if o.publicPaths == nil {
-			o.publicPaths = make(map[string]struct{}, len(paths))
+		if s.publicPaths == nil {
+			s.publicPaths = make(map[string]struct{}, len(paths))
 		}
-		for _, path := range paths {
-			if path == "" {
-				continue
+		for _, p := range paths {
+			if p != "" {
+				s.publicPaths[p] = struct{}{}
 			}
-			o.publicPaths[path] = struct{}{}
 		}
 	}
 }
 
 // WithAllowedOrigins configures the allowed origins for CORS.
 func WithAllowedOrigins(origins []string) ServerOption {
-	return func(o *Server) {
-		o.allowedOrigins = origins
-	}
+	return func(s *Server) { s.allowedOrigins = origins }
+}
+
+// WithHTTPLogger configures a structured logger. Defaults to
+// slog.Default with a "component" attribute.
+func WithHTTPLogger(log *slog.Logger) ServerOption {
+	return func(s *Server) { s.log = log }
 }
 
 // NewServer creates a new HTTP server with the given options.
 func NewServer(opts ...ServerOption) (*Server, error) {
-	srv := &Server{
+	s := &Server{
 		address: ":8299",
 	}
 	for _, opt := range opts {
-		opt(srv)
+		opt(s)
+	}
+	if s.log == nil {
+		s.log = slog.Default().With("component", "http-server")
 	}
 
-	mux := http.NewServeMux()
-	if srv.mount != nil {
-		if err := srv.mount(mux); err != nil {
-			return nil, err
-		}
+	handler, err := s.buildHandler()
+	if err != nil {
+		return nil, err
 	}
 
-	// Build Middleware Chain
-	// The order is critical: H2C -> CORS -> Auth -> Mux
-	var handler http.Handler = mux
-
-	// Apply Authentication Middleware
-	if srv.authMiddleware != nil {
-		protected := srv.authMiddleware.Wrap(handler)
-		if len(srv.publicPaths) == 0 {
-			handler = protected
-		} else {
-			handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if _, ok := srv.publicPaths[r.URL.Path]; ok {
-					mux.ServeHTTP(w, r)
-					return
-				}
-				protected.ServeHTTP(w, r)
-			})
-		}
-	}
-
-	// Apply CORS Middleware
-	if len(srv.allowedOrigins) == 0 {
-		// If no allowed origins are specified, allow all origins.
-		handler = cors.AllowAll().Handler(handler)
-	} else {
-		// Strict CORS configuration
-		c := cors.New(cors.Options{
-			AllowedOrigins:   srv.allowedOrigins,
-			AllowedMethods:   connectcors.AllowedMethods(),
-			AllowedHeaders:   connectcors.AllowedHeaders(),
-			ExposedHeaders:   connectcors.ExposedHeaders(),
-			AllowCredentials: true,
-			MaxAge:           7200,
-		})
-		handler = c.Handler(handler)
-	}
-
-	// HTTP/2 Support
 	protocols := new(http.Protocols)
 	protocols.SetHTTP1(true)
 	protocols.SetUnencryptedHTTP2(true)
 
-	// Configure HTTP Server
-	srv.Server = &http.Server{
-		Addr:              srv.address,
+	s.inner = &http.Server{
+		Addr:              s.address,
 		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       5 * time.Minute,
 		WriteTimeout:      5 * time.Minute,
-		MaxHeaderBytes:    8 * 1024, // 8KiB
+		MaxHeaderBytes:    8 * 1024, // 8 KiB
 		Protocols:         protocols,
 	}
 
-	return srv, nil
+	return s, nil
 }
 
-// Start starts the HTTP server and blocks until the context is canceled.
+// Handler returns the server's top-level HTTP handler. This is useful
+// for testing the middleware chain without starting a real listener.
+func (s *Server) Handler() http.Handler {
+	return s.inner.Handler
+}
+
+// Start begins accepting connections and blocks until the server is
+// shut down or an unrecoverable error occurs.
 func (s *Server) Start(ctx context.Context) error {
-	listener, err := net.Listen("tcp", s.address)
+	ln, err := net.Listen("tcp", s.address)
 	if err != nil {
-		return err
+		return fmt.Errorf("http listen %q: %w", s.address, err)
 	}
 
-	s.BaseContext = func(net.Listener) context.Context {
+	s.inner.BaseContext = func(net.Listener) context.Context {
 		return ctx
 	}
 
-	slog.Info("Server starting on",
-		"address", listener.Addr().String(),
-		"authMiddleware", s.authMiddleware != nil,
-		"publicPaths", len(s.publicPaths),
-		"allowedOrigins", s.allowedOrigins,
+	s.log.Info("starting",
+		"address", ln.Addr().String(),
+		"auth", s.authMiddleware != nil,
+		"public_paths", len(s.publicPaths),
+		"allowed_origins", s.allowedOrigins,
 	)
 
-	if err := s.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		return err
+	if err := s.inner.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return fmt.Errorf("http serve: %w", err)
 	}
 
 	return nil
 }
 
-// Stop stops the HTTP server gracefully.
+// Stop gracefully drains connections. If the graceful shutdown
+// exceeds the context deadline it forces an immediate close.
 func (s *Server) Stop(ctx context.Context) error {
-	slog.Info("Gracefully shutting down HTTP server...")
-	if err := s.Shutdown(ctx); err != nil {
-		slog.Error("Graceful shutdown failed, forcing close", "error", err)
-		return s.Close()
+	s.log.Info("shutting down")
+	if err := s.inner.Shutdown(ctx); err != nil {
+		s.log.Error("graceful shutdown failed, forcing close", "error", err)
+		return s.inner.Close()
 	}
 	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Middleware chain
+// ---------------------------------------------------------------------------
+
+// buildHandler assembles the middleware stack.
+// Order: H2C -> CORS -> Auth -> Mux
+func (s *Server) buildHandler() (http.Handler, error) {
+	mux := http.NewServeMux()
+	if s.mount != nil {
+		if err := s.mount(mux); err != nil {
+			return nil, fmt.Errorf("mount routes: %w", err)
+		}
+	}
+
+	var handler http.Handler = mux
+
+	// Authentication
+	if s.authMiddleware != nil {
+		handler = s.wrapAuth(mux, handler)
+	}
+
+	// CORS
+	handler = s.wrapCORS(handler)
+
+	return handler, nil
+}
+
+// wrapAuth applies the authn middleware, skipping public paths.
+func (s *Server) wrapAuth(mux *http.ServeMux, next http.Handler) http.Handler {
+	protected := s.authMiddleware.Wrap(next)
+	if len(s.publicPaths) == 0 {
+		return protected
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := s.publicPaths[r.URL.Path]; ok {
+			mux.ServeHTTP(w, r)
+			return
+		}
+		protected.ServeHTTP(w, r)
+	})
+}
+
+// wrapCORS applies CORS headers. When no origins are configured it
+// defaults to allowing all origins.
+func (s *Server) wrapCORS(next http.Handler) http.Handler {
+	if len(s.allowedOrigins) == 0 {
+		return cors.AllowAll().Handler(next)
+	}
+	c := cors.New(cors.Options{
+		AllowedOrigins:   s.allowedOrigins,
+		AllowedMethods:   connectcors.AllowedMethods(),
+		AllowedHeaders:   connectcors.AllowedHeaders(),
+		ExposedHeaders:   connectcors.ExposedHeaders(),
+		AllowCredentials: true,
+		MaxAge:           7200,
+	})
+	return c.Handler(next)
 }
