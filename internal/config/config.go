@@ -101,12 +101,12 @@ func (c *Config) AgentCluster() string {
 	return c.v.GetString(keyAgentCluster) // OTTERSCALE_AGENT_CLUSTER
 }
 
-func (c *Config) AgentTunnelServerURL() string {
-	return c.v.GetString(keyAgentTunnelServerURL) // OTTERSCALE_AGENT_TUNNEL_SERVER_URL
+func (c *Config) AgentServerURL() string {
+	return c.v.GetString(keyAgentServerURL) // OTTERSCALE_AGENT_SERVER_URL
 }
 
-func (c *Config) AgentTunnelPort() int {
-	return c.v.GetInt(keyAgentTunnelPort) // OTTERSCALE_AGENT_TUNNEL_PORT
+func (c *Config) AgentTunnelServerURL() string {
+	return c.v.GetString(keyAgentTunnelServerURL) // OTTERSCALE_AGENT_TUNNEL_SERVER_URL
 }
 
 func (c *Config) AgentTunnelAuth() string {
