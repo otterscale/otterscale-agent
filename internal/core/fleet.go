@@ -4,14 +4,13 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
-	"net"
 
 	chserver "github.com/jpillora/chisel/server"
 )
 
 type TunnelProvider interface {
 	Server() *chserver.Server
-	RegisterCluster(cluster, user, pass string, tunnelPort int) error
+	RegisterCluster(cluster, user, pass string) (string, error)
 	ResolveAddress(cluster string) (string, error)
 }
 
@@ -25,22 +24,16 @@ func NewFleetUseCase(tunnel TunnelProvider) *FleetUseCase {
 	}
 }
 
-func (uc *FleetUseCase) RegisterCluster(cluster, agentID string) (string, int, error) {
-	token, err := uc.generateToken()
+func (uc *FleetUseCase) RegisterCluster(cluster, agentID string) (host, token string, err error) {
+	token, err = uc.generateToken()
 	if err != nil {
-		return "", 0, err
+		return
 	}
-
-	freePort, err := uc.findFreePort()
+	host, err = uc.tunnel.RegisterCluster(cluster, agentID, token)
 	if err != nil {
-		return "", 0, err
+		return
 	}
-
-	if err := uc.tunnel.RegisterCluster(cluster, agentID, token, freePort); err != nil {
-		return "", 0, err
-	}
-
-	return token, freePort, nil
+	return
 }
 
 func (uc *FleetUseCase) Fingerprint() string {
@@ -54,14 +47,4 @@ func (uc *FleetUseCase) generateToken() (string, error) {
 		return "", fmt.Errorf("failed to generate random token: %w", err)
 	}
 	return base64.RawURLEncoding.EncodeToString(buf), nil
-}
-
-func (uc *FleetUseCase) findFreePort() (int, error) {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		return 0, err
-	}
-	port := listener.Addr().(*net.TCPAddr).Port
-	listener.Close()
-	return port, nil
 }

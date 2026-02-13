@@ -23,14 +23,14 @@ func NewFleetService(fleet *core.FleetUseCase) *FleetService {
 var _ pbconnect.FleetServiceHandler = (*FleetService)(nil)
 
 func (s *FleetService) Register(ctx context.Context, req *pb.RegisterRequest) (*pb.RegisterResponse, error) {
-	token, port, err := s.fleet.RegisterCluster(req.GetCluster(), req.GetAgentId())
+	host, token, err := s.fleet.RegisterCluster(req.GetCluster(), req.GetAgentId())
 	if err != nil {
 		return nil, err
 	}
 
 	resp := &pb.RegisterResponse{}
+	resp.SetTunnelHost(host)
 	resp.SetFingerprint(s.fleet.Fingerprint())
 	resp.SetToken(token)
-	resp.SetTunnelPort(int32(port))
 	return resp, nil
 }
