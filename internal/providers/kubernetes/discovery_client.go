@@ -15,10 +15,15 @@ import (
 	"github.com/otterscale/otterscale-agent/internal/core"
 )
 
+// discoveryClient implements core.DiscoveryClient by delegating to the
+// Kubernetes discovery API of the target cluster, accessed through the
+// tunnel.
 type discoveryClient struct {
 	kubernetes *Kubernetes
 }
 
+// NewDiscoveryClient returns a core.DiscoveryClient backed by the
+// Kubernetes discovery API.
 func NewDiscoveryClient(kubernetes *Kubernetes) core.DiscoveryClient {
 	return &discoveryClient{
 		kubernetes: kubernetes,
@@ -27,6 +32,9 @@ func NewDiscoveryClient(kubernetes *Kubernetes) core.DiscoveryClient {
 
 var _ core.DiscoveryClient = (*discoveryClient)(nil)
 
+// LookupResource verifies that the given group/version/resource triple
+// exists on the target cluster. It returns the validated GVR or a
+// BadRequest error if the resource is not recognised.
 func (d *discoveryClient) LookupResource(ctx context.Context, cluster, group, version, resource string) (schema.GroupVersionResource, error) {
 	client, err := d.client(ctx, cluster)
 	if err != nil {
@@ -52,6 +60,8 @@ func (d *discoveryClient) LookupResource(ctx context.Context, cluster, group, ve
 	return schema.GroupVersionResource{}, apierrors.NewBadRequest(fmt.Sprintf("unable to recognize resource %s", gvr))
 }
 
+// ServerResources returns the full list of API resources available on
+// the target cluster.
 func (d *discoveryClient) ServerResources(ctx context.Context, cluster string) ([]*metav1.APIResourceList, error) {
 	client, err := d.client(ctx, cluster)
 	if err != nil {
@@ -62,13 +72,15 @@ func (d *discoveryClient) ServerResources(ctx context.Context, cluster string) (
 	return resources, err
 }
 
+// ResolveSchema fetches the OpenAPI schema for the given GVK from the
+// target cluster's discovery endpoint.
 func (d *discoveryClient) ResolveSchema(ctx context.Context, cluster, group, version, kind string) (*spec.Schema, error) {
 	client, err := d.client(ctx, cluster)
 	if err != nil {
 		return nil, err
 	}
 
-	resolver := &resolver.ClientDiscoveryResolver{
+	schemaResolver := &resolver.ClientDiscoveryResolver{
 		Discovery: client,
 	}
 	gvk := schema.GroupVersionKind{
@@ -76,9 +88,10 @@ func (d *discoveryClient) ResolveSchema(ctx context.Context, cluster, group, ver
 		Version: version,
 		Kind:    kind,
 	}
-	return resolver.ResolveSchema(gvk)
+	return schemaResolver.ResolveSchema(gvk)
 }
 
+// ServerVersion returns the Kubernetes version of the target cluster.
 func (d *discoveryClient) ServerVersion(ctx context.Context, cluster string) (*version.Info, error) {
 	client, err := d.client(ctx, cluster)
 	if err != nil {
@@ -87,6 +100,7 @@ func (d *discoveryClient) ServerVersion(ctx context.Context, cluster string) (*v
 	return client.ServerVersion()
 }
 
+// client builds an impersonated discovery client for the given cluster.
 func (d *discoveryClient) client(ctx context.Context, cluster string) (*discovery.DiscoveryClient, error) {
 	config, err := d.kubernetes.impersonationConfig(ctx, cluster)
 	if err != nil {

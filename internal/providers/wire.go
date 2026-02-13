@@ -1,3 +1,5 @@
+// Package providers aggregates all infrastructure-layer implementations
+// (chisel, kubernetes, otterscale) into a single Wire provider set.
 package providers
 
 import (
@@ -8,6 +10,7 @@ import (
 	"github.com/otterscale/otterscale-agent/internal/providers/otterscale"
 )
 
+// ProviderSet is the Wire provider set for all external adapters.
 var ProviderSet = wire.NewSet(
 	chisel.NewService,
 	kubernetes.New,
