@@ -41,6 +41,10 @@ func NewResourceService(resource *core.ResourceUseCase) *ResourceService {
 
 var _ pbconnect.ResourceServiceHandler = (*ResourceService)(nil)
 
+// ---------------------------------------------------------------------------
+// Discovery / Schema
+// ---------------------------------------------------------------------------
+
 // Discovery returns the full list of API resources available on the
 // target cluster.
 func (s *ResourceService) Discovery(ctx context.Context, req *pb.DiscoveryRequest) (*pb.DiscoveryResponse, error) {
@@ -62,16 +66,37 @@ func (s *ResourceService) Discovery(ctx context.Context, req *pb.DiscoveryReques
 // Schema returns the OpenAPI schema for the given GVK, serialised as
 // a protobuf Struct.
 func (s *ResourceService) Schema(ctx context.Context, req *pb.SchemaRequest) (*structpb.Struct, error) {
-	resolved, err := s.resource.ResolveSchema(ctx, req.GetCluster(), req.GetGroup(), req.GetVersion(), req.GetKind())
+	resolved, err := s.resource.ResolveSchema(
+		ctx,
+		req.GetCluster(),
+		req.GetGroup(),
+		req.GetVersion(),
+		req.GetKind(),
+	)
 	if err != nil {
 		return nil, k8sErrorToConnectError(err)
 	}
 	return s.toProtoStructFromJSONSchema(resolved)
 }
 
+// ---------------------------------------------------------------------------
+// CRUD
+// ---------------------------------------------------------------------------
+
 // List returns a paged list of resources matching the request filters.
 func (s *ResourceService) List(ctx context.Context, req *pb.ListRequest) (*pb.ListResponse, error) {
-	resources, err := s.resource.ListResources(ctx, req.GetCluster(), req.GetGroup(), req.GetVersion(), req.GetResource(), req.GetNamespace(), req.GetLabelSelector(), req.GetFieldSelector(), req.GetLimit(), req.GetContinue())
+	resources, err := s.resource.ListResources(
+		ctx,
+		req.GetCluster(),
+		req.GetGroup(),
+		req.GetVersion(),
+		req.GetResource(),
+		req.GetNamespace(),
+		req.GetLabelSelector(),
+		req.GetFieldSelector(),
+		req.GetLimit(),
+		req.GetContinue(),
+	)
 	if err != nil {
 		return nil, k8sErrorToConnectError(err)
 	}
@@ -91,7 +116,15 @@ func (s *ResourceService) List(ctx context.Context, req *pb.ListRequest) (*pb.Li
 
 // Get returns a single resource by name.
 func (s *ResourceService) Get(ctx context.Context, req *pb.GetRequest) (*pb.Resource, error) {
-	resource, err := s.resource.GetResource(ctx, req.GetCluster(), req.GetGroup(), req.GetVersion(), req.GetResource(), req.GetNamespace(), req.GetName())
+	resource, err := s.resource.GetResource(
+		ctx,
+		req.GetCluster(),
+		req.GetGroup(),
+		req.GetVersion(),
+		req.GetResource(),
+		req.GetNamespace(),
+		req.GetName(),
+	)
 	if err != nil {
 		return nil, k8sErrorToConnectError(err)
 	}
@@ -100,7 +133,15 @@ func (s *ResourceService) Get(ctx context.Context, req *pb.GetRequest) (*pb.Reso
 
 // Create creates a new resource from the YAML manifest in the request.
 func (s *ResourceService) Create(ctx context.Context, req *pb.CreateRequest) (*pb.Resource, error) {
-	resource, err := s.resource.CreateResource(ctx, req.GetCluster(), req.GetGroup(), req.GetVersion(), req.GetResource(), req.GetNamespace(), req.GetManifest())
+	resource, err := s.resource.CreateResource(
+		ctx,
+		req.GetCluster(),
+		req.GetGroup(),
+		req.GetVersion(),
+		req.GetResource(),
+		req.GetNamespace(),
+		req.GetManifest(),
+	)
 	if err != nil {
 		return nil, k8sErrorToConnectError(err)
 	}
@@ -109,7 +150,18 @@ func (s *ResourceService) Create(ctx context.Context, req *pb.CreateRequest) (*p
 
 // Apply performs a server-side apply for the given resource.
 func (s *ResourceService) Apply(ctx context.Context, req *pb.ApplyRequest) (*pb.Resource, error) {
-	resource, err := s.resource.ApplyResource(ctx, req.GetCluster(), req.GetGroup(), req.GetVersion(), req.GetResource(), req.GetNamespace(), req.GetName(), req.GetManifest(), req.GetForce(), req.GetFieldManager())
+	resource, err := s.resource.ApplyResource(
+		ctx,
+		req.GetCluster(),
+		req.GetGroup(),
+		req.GetVersion(),
+		req.GetResource(),
+		req.GetNamespace(),
+		req.GetName(),
+		req.GetManifest(),
+		req.GetForce(),
+		req.GetFieldManager(),
+	)
 	if err != nil {
 		return nil, k8sErrorToConnectError(err)
 	}
@@ -124,17 +176,77 @@ func (s *ResourceService) Delete(ctx context.Context, req *pb.DeleteRequest) (*e
 		v := req.GetGracePeriodSeconds()
 		gracePeriod = &v
 	}
-	if err := s.resource.DeleteResource(ctx, req.GetCluster(), req.GetGroup(), req.GetVersion(), req.GetResource(), req.GetNamespace(), req.GetName(), gracePeriod); err != nil {
+
+	if err := s.resource.DeleteResource(
+		ctx,
+		req.GetCluster(),
+		req.GetGroup(),
+		req.GetVersion(),
+		req.GetResource(),
+		req.GetNamespace(),
+		req.GetName(),
+		gracePeriod,
+	); err != nil {
 		return nil, k8sErrorToConnectError(err)
 	}
 	return &emptypb.Empty{}, nil
 }
 
+// ---------------------------------------------------------------------------
+// Describe
+// ---------------------------------------------------------------------------
+
+// Describe returns a resource together with its related Kubernetes
+// events, equivalent to `kubectl describe`.
+func (s *ResourceService) Describe(ctx context.Context, req *pb.DescribeRequest) (*pb.DescribeResponse, error) {
+	obj, events, err := s.resource.DescribeResource(
+		ctx,
+		req.GetCluster(),
+		req.GetGroup(),
+		req.GetVersion(),
+		req.GetResource(),
+		req.GetNamespace(),
+		req.GetName(),
+	)
+	if err != nil {
+		return nil, k8sErrorToConnectError(err)
+	}
+
+	pbResource, err := s.toProtoResource(obj.Object)
+	if err != nil {
+		return nil, err
+	}
+
+	pbEvents, err := s.toProtoResources(events.Items)
+	if err != nil {
+		return nil, err
+	}
+
+	resp := &pb.DescribeResponse{}
+	resp.SetResource(pbResource)
+	resp.SetEvents(pbEvents)
+	return resp, nil
+}
+
+// ---------------------------------------------------------------------------
+// Watch
+// ---------------------------------------------------------------------------
+
 // Watch opens a server-streaming RPC that forwards Kubernetes watch
 // events to the client. The stream ends when the client cancels the
 // context or the upstream watcher closes.
 func (s *ResourceService) Watch(ctx context.Context, req *pb.WatchRequest, stream *connect.ServerStream[pb.WatchEvent]) error {
-	watcher, err := s.resource.WatchResource(ctx, req.GetCluster(), req.GetGroup(), req.GetVersion(), req.GetResource(), req.GetNamespace(), req.GetLabelSelector(), req.GetFieldSelector(), req.GetResourceVersion())
+	watcher, err := s.resource.WatchResource(
+		ctx,
+		req.GetCluster(),
+		req.GetGroup(),
+		req.GetVersion(),
+		req.GetResource(),
+		req.GetNamespace(),
+		req.GetLabelSelector(),
+		req.GetFieldSelector(),
+		req.GetResourceVersion(),
+	)
 	if err != nil {
 		return k8sErrorToConnectError(err)
 	}

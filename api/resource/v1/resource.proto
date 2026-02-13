@@ -36,14 +36,22 @@ service ResourceService {
   };
 
   // Get retrieves a single resource by its name within a namespace.
-  rpc Get(GetRequest) returns (Resource){
+  rpc Get(GetRequest) returns (Resource) {
+    option (otterscale.api.feature) = {
+      name: "resource-enabled"
+    };
+  };
+
+  // Describe retrieves a resource along with its related Kubernetes events,
+  // equivalent to `kubectl describe`.
+  rpc Describe(DescribeRequest) returns (DescribeResponse) {
     option (otterscale.api.feature) = {
       name: "resource-enabled"
     };
   };
 
   // Create creates a new resource in the cluster using the provided manifest.
-  rpc Create(CreateRequest) returns (Resource){
+  rpc Create(CreateRequest) returns (Resource) {
     option (otterscale.api.feature) = {
       name: "resource-enabled"
     };
@@ -51,35 +59,52 @@ service ResourceService {
 
   // Apply performs a Server-Side Apply (SSA) to update or create a resource.
   // This is the recommended way to perform partial updates.
-  rpc Apply(ApplyRequest) returns (Resource){
+  rpc Apply(ApplyRequest) returns (Resource) {
     option (otterscale.api.feature) = {
       name: "resource-enabled"
     };
   };
 
   // Delete removes a resource from the cluster by its name.
-  rpc Delete(DeleteRequest) returns (google.protobuf.Empty){
+  rpc Delete(DeleteRequest) returns (google.protobuf.Empty) {
     option (otterscale.api.feature) = {
       name: "resource-enabled"
     };
   };
 
   // Watch initiates a server-side stream to monitor resource changes in real-time.
-  rpc Watch(WatchRequest) returns (stream WatchEvent){
+  rpc Watch(WatchRequest) returns (stream WatchEvent) {
     option (otterscale.api.feature) = {
       name: "resource-enabled"
     };
   };
 }
 
+// ---------------------------------------------------------------------------
+// Discovery / Schema
+// ---------------------------------------------------------------------------
+
 // APIResource represents a Kubernetes API resource with its metadata.
 message APIResource {
-  string          group       = 1;
-  string          version     = 2;
-  string          resource    = 3;
-  string          kind        = 4;
-  bool            namespaced  = 5;
-  repeated string verbs       = 6;
+  // Kubernetes API Group (e.g., "apps" for Deployments, "" for core resources).
+  string group = 1;
+
+  // Kubernetes API Version (e.g., "v1").
+  string version = 2;
+
+  // Resource name in plural (e.g., "pods", "deployments").
+  string resource = 3;
+
+  // The kind of the resource (e.g., "Pod", "Deployment").
+  string kind = 4;
+
+  // Whether this resource is namespace-scoped.
+  bool namespaced = 5;
+
+  // The list of supported verbs (e.g., "get", "list", "create", "delete").
+  repeated string verbs = 6;
+
+  // Abbreviated aliases for the resource (e.g., "deploy" for deployments).
   repeated string short_names = 7;
 }
 
@@ -95,7 +120,7 @@ message DiscoveryResponse {
   repeated APIResource api_resources = 1;
 }
 
-// SchemaRequest defines the parameters to retrieve the schema of a specific GVR.
+// SchemaRequest defines the parameters to retrieve the schema of a specific GVK.
 message SchemaRequest {
   // The target Kubernetes cluster identifier.
   string cluster = 1;
@@ -106,9 +131,13 @@ message SchemaRequest {
   // Kubernetes API Version (e.g., "v1").
   string version = 3;
 
-  // Kubernetes API Kind (e,g, "Pod").
+  // Kubernetes API Kind (e.g., "Pod").
   string kind = 4;
 }
+
+// ---------------------------------------------------------------------------
+// Resource
+// ---------------------------------------------------------------------------
 
 // Resource represents a single Kubernetes object serialized as a JSON string.
 message Resource {
@@ -116,6 +145,10 @@ message Resource {
   // Note: Backend may strip managedFields to reduce payload size.
   google.protobuf.Struct object = 1;
 }
+
+// ---------------------------------------------------------------------------
+// List
+// ---------------------------------------------------------------------------
 
 // ListRequest defines the parameters for querying multiple resources.
 message ListRequest {
@@ -162,65 +195,178 @@ message ListResponse {
   repeated Resource items = 4;
 }
 
+// ---------------------------------------------------------------------------
+// Get
+// ---------------------------------------------------------------------------
+
 // GetRequest defines the parameters to fetch a single object.
 message GetRequest {
-  string cluster   = 1;
-  string group     = 2;
-  string version   = 3;
-  string resource  = 4;
+  // The target Kubernetes cluster identifier.
+  string cluster = 1;
+
+  // Kubernetes API Group (e.g., "apps" for Deployments, "" for core resources like Pods).
+  string group = 2;
+
+  // Kubernetes API Version (e.g., "v1").
+  string version = 3;
+
+  // Kubernetes API Resource name in plural (e.g., "pods", "deployments").
+  string resource = 4;
+
+  // The namespace of the resource.
   string namespace = 5;
-  string name      = 6;
+
+  // The name of the resource.
+  string name = 6;
 }
+
+// ---------------------------------------------------------------------------
+// Describe
+// ---------------------------------------------------------------------------
+
+// DescribeRequest defines the parameters to describe a resource, retrieving
+// it along with its related Kubernetes events. Equivalent to `kubectl describe`.
+message DescribeRequest {
+  // The target Kubernetes cluster identifier.
+  string cluster = 1;
+
+  // Kubernetes API Group (e.g., "apps" for Deployments, "" for core resources like Pods).
+  string group = 2;
+
+  // Kubernetes API Version (e.g., "v1").
+  string version = 3;
+
+  // Kubernetes API Resource name in plural (e.g., "pods", "deployments").
+  string resource = 4;
+
+  // The namespace of the resource.
+  string namespace = 5;
+
+  // The name of the resource.
+  string name = 6;
+}
+
+// DescribeResponse contains the resource and its related Kubernetes events.
+message DescribeResponse {
+  // The full resource object.
+  Resource resource = 1;
+
+  // Kubernetes events related to this resource, filtered by involvedObject.uid.
+  repeated Resource events = 2;
+}
+
+// ---------------------------------------------------------------------------
+// Create
+// ---------------------------------------------------------------------------
 
 // CreateRequest defines the parameters for creating a new object.
 message CreateRequest {
-  string cluster   = 1;
-  string group     = 2;
-  string version   = 3;
-  string resource  = 4;
+  // The target Kubernetes cluster identifier.
+  string cluster = 1;
+
+  // Kubernetes API Group (e.g., "apps" for Deployments, "" for core resources like Pods).
+  string group = 2;
+
+  // Kubernetes API Version (e.g., "v1").
+  string version = 3;
+
+  // Kubernetes API Resource name in plural (e.g., "pods", "deployments").
+  string resource = 4;
+
+  // The namespace of the resource.
   string namespace = 5;
 
   // The full manifest of the object to be created in YAML format.
   bytes manifest = 6;
 }
 
+// ---------------------------------------------------------------------------
+// Apply
+// ---------------------------------------------------------------------------
+
 // ApplyRequest defines the parameters for Server-Side Apply (SSA).
 message ApplyRequest {
-  string cluster   = 1;
-  string group     = 2;
-  string version   = 3;
-  string resource  = 4;
+  // The target Kubernetes cluster identifier.
+  string cluster = 1;
+
+  // Kubernetes API Group (e.g., "apps" for Deployments, "" for core resources like Pods).
+  string group = 2;
+
+  // Kubernetes API Version (e.g., "v1").
+  string version = 3;
+
+  // Kubernetes API Resource name in plural (e.g., "pods", "deployments").
+  string resource = 4;
+
+  // The namespace of the resource.
   string namespace = 5;
-  string name      = 6;
+
+  // The name of the resource.
+  string name = 6;
 
   // A partial or YAML manifest in JSON format to be merged by the API server.
   bytes manifest = 7;
 
+  // If true, conflicts are resolved in favour of the caller's field manager.
   bool force = 8;
 
   // Identifies the entity managing the fields (e.g., "otterscale-web-ui"). Required for SSA.
   string field_manager = 9;
 }
 
+// ---------------------------------------------------------------------------
+// Delete
+// ---------------------------------------------------------------------------
+
 // DeleteRequest defines the parameters to remove an object.
 message DeleteRequest {
-  string cluster              = 1;
-  string group                = 2;
-  string version              = 3;
-  string resource             = 4;
-  string namespace            = 5;
-  string name                 = 6;
-  int64  grace_period_seconds = 7;
+  // The target Kubernetes cluster identifier.
+  string cluster = 1;
+
+  // Kubernetes API Group (e.g., "apps" for Deployments, "" for core resources like Pods).
+  string group = 2;
+
+  // Kubernetes API Version (e.g., "v1").
+  string version = 3;
+
+  // Kubernetes API Resource name in plural (e.g., "pods", "deployments").
+  string resource = 4;
+
+  // The namespace of the resource.
+  string namespace = 5;
+
+  // The name of the resource.
+  string name = 6;
+
+  // The duration in seconds before the object should be deleted. Overrides the default grace period.
+  int64 grace_period_seconds = 7;
 }
+
+// ---------------------------------------------------------------------------
+// Watch
+// ---------------------------------------------------------------------------
 
 // WatchRequest defines the parameters to start a streaming watch.
 message WatchRequest {
-  string cluster        = 1;
-  string group          = 2;
-  string version        = 3;
-  string resource       = 4;
-  string namespace      = 5;
+  // The target Kubernetes cluster identifier.
+  string cluster = 1;
+
+  // Kubernetes API Group (e.g., "apps" for Deployments, "" for core resources like Pods).
+  string group = 2;
+
+  // Kubernetes API Version (e.g., "v1").
+  string version = 3;
+
+  // Kubernetes API Resource name in plural (e.g., "pods", "deployments").
+  string resource = 4;
+
+  // The namespace to watch.
+  string namespace = 5;
+
+  // A selector to restrict watched objects by their labels.
   string label_selector = 6;
+
+  // A selector to restrict watched objects by their fields.
   string field_selector = 7;
 
   // Start the watch from this specific resource version.
@@ -231,12 +377,18 @@ message WatchRequest {
 message WatchEvent {
   // Type defines the possible types of events from Kubernetes watch.
   enum Type {
+    // Unspecified event type (default zero value).
     TYPE_UNSPECIFIED = 0;
-    TYPE_ADDED       = 1;
-    TYPE_MODIFIED    = 2;
-    TYPE_DELETED     = 3;
-    TYPE_BOOKMARK    = 4;
-    TYPE_ERROR       = 5;
+    // A resource was added.
+    TYPE_ADDED = 1;
+    // A resource was modified.
+    TYPE_MODIFIED = 2;
+    // A resource was deleted.
+    TYPE_DELETED = 3;
+    // A bookmark event carrying only a resourceVersion (no resource payload).
+    TYPE_BOOKMARK = 4;
+    // An error occurred on the server side.
+    TYPE_ERROR = 5;
   }
 
   // The type of the watch event.

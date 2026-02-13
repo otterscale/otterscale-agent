@@ -44,6 +44,9 @@ const (
 	ResourceServiceListProcedure = "/otterscale.resource.v1.ResourceService/List"
 	// ResourceServiceGetProcedure is the fully-qualified name of the ResourceService's Get RPC.
 	ResourceServiceGetProcedure = "/otterscale.resource.v1.ResourceService/Get"
+	// ResourceServiceDescribeProcedure is the fully-qualified name of the ResourceService's Describe
+	// RPC.
+	ResourceServiceDescribeProcedure = "/otterscale.resource.v1.ResourceService/Describe"
 	// ResourceServiceCreateProcedure is the fully-qualified name of the ResourceService's Create RPC.
 	ResourceServiceCreateProcedure = "/otterscale.resource.v1.ResourceService/Create"
 	// ResourceServiceApplyProcedure is the fully-qualified name of the ResourceService's Apply RPC.
@@ -67,6 +70,9 @@ type ResourceServiceClient interface {
 	List(context.Context, *v1.ListRequest) (*v1.ListResponse, error)
 	// Get retrieves a single resource by its name within a namespace.
 	Get(context.Context, *v1.GetRequest) (*v1.Resource, error)
+	// Describe retrieves a resource along with its related Kubernetes events,
+	// equivalent to `kubectl describe`.
+	Describe(context.Context, *v1.DescribeRequest) (*v1.DescribeResponse, error)
 	// Create creates a new resource in the cluster using the provided manifest.
 	Create(context.Context, *v1.CreateRequest) (*v1.Resource, error)
 	// Apply performs a Server-Side Apply (SSA) to update or create a resource.
@@ -113,6 +119,12 @@ func NewResourceServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			connect.WithSchema(resourceServiceMethods.ByName("Get")),
 			connect.WithClientOptions(opts...),
 		),
+		describe: connect.NewClient[v1.DescribeRequest, v1.DescribeResponse](
+			httpClient,
+			baseURL+ResourceServiceDescribeProcedure,
+			connect.WithSchema(resourceServiceMethods.ByName("Describe")),
+			connect.WithClientOptions(opts...),
+		),
 		create: connect.NewClient[v1.CreateRequest, v1.Resource](
 			httpClient,
 			baseURL+ResourceServiceCreateProcedure,
@@ -146,6 +158,7 @@ type resourceServiceClient struct {
 	schema    *connect.Client[v1.SchemaRequest, structpb.Struct]
 	list      *connect.Client[v1.ListRequest, v1.ListResponse]
 	get       *connect.Client[v1.GetRequest, v1.Resource]
+	describe  *connect.Client[v1.DescribeRequest, v1.DescribeResponse]
 	create    *connect.Client[v1.CreateRequest, v1.Resource]
 	apply     *connect.Client[v1.ApplyRequest, v1.Resource]
 	delete    *connect.Client[v1.DeleteRequest, emptypb.Empty]
@@ -182,6 +195,15 @@ func (c *resourceServiceClient) List(ctx context.Context, req *v1.ListRequest) (
 // Get calls otterscale.resource.v1.ResourceService.Get.
 func (c *resourceServiceClient) Get(ctx context.Context, req *v1.GetRequest) (*v1.Resource, error) {
 	response, err := c.get.CallUnary(ctx, connect.NewRequest(req))
+	if response != nil {
+		return response.Msg, err
+	}
+	return nil, err
+}
+
+// Describe calls otterscale.resource.v1.ResourceService.Describe.
+func (c *resourceServiceClient) Describe(ctx context.Context, req *v1.DescribeRequest) (*v1.DescribeResponse, error) {
+	response, err := c.describe.CallUnary(ctx, connect.NewRequest(req))
 	if response != nil {
 		return response.Msg, err
 	}
@@ -234,6 +256,9 @@ type ResourceServiceHandler interface {
 	List(context.Context, *v1.ListRequest) (*v1.ListResponse, error)
 	// Get retrieves a single resource by its name within a namespace.
 	Get(context.Context, *v1.GetRequest) (*v1.Resource, error)
+	// Describe retrieves a resource along with its related Kubernetes events,
+	// equivalent to `kubectl describe`.
+	Describe(context.Context, *v1.DescribeRequest) (*v1.DescribeResponse, error)
 	// Create creates a new resource in the cluster using the provided manifest.
 	Create(context.Context, *v1.CreateRequest) (*v1.Resource, error)
 	// Apply performs a Server-Side Apply (SSA) to update or create a resource.
@@ -276,6 +301,12 @@ func NewResourceServiceHandler(svc ResourceServiceHandler, opts ...connect.Handl
 		connect.WithSchema(resourceServiceMethods.ByName("Get")),
 		connect.WithHandlerOptions(opts...),
 	)
+	resourceServiceDescribeHandler := connect.NewUnaryHandlerSimple(
+		ResourceServiceDescribeProcedure,
+		svc.Describe,
+		connect.WithSchema(resourceServiceMethods.ByName("Describe")),
+		connect.WithHandlerOptions(opts...),
+	)
 	resourceServiceCreateHandler := connect.NewUnaryHandlerSimple(
 		ResourceServiceCreateProcedure,
 		svc.Create,
@@ -310,6 +341,8 @@ func NewResourceServiceHandler(svc ResourceServiceHandler, opts ...connect.Handl
 			resourceServiceListHandler.ServeHTTP(w, r)
 		case ResourceServiceGetProcedure:
 			resourceServiceGetHandler.ServeHTTP(w, r)
+		case ResourceServiceDescribeProcedure:
+			resourceServiceDescribeHandler.ServeHTTP(w, r)
 		case ResourceServiceCreateProcedure:
 			resourceServiceCreateHandler.ServeHTTP(w, r)
 		case ResourceServiceApplyProcedure:
@@ -341,6 +374,10 @@ func (UnimplementedResourceServiceHandler) List(context.Context, *v1.ListRequest
 
 func (UnimplementedResourceServiceHandler) Get(context.Context, *v1.GetRequest) (*v1.Resource, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("otterscale.resource.v1.ResourceService.Get is not implemented"))
+}
+
+func (UnimplementedResourceServiceHandler) Describe(context.Context, *v1.DescribeRequest) (*v1.DescribeResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("otterscale.resource.v1.ResourceService.Describe is not implemented"))
 }
 
 func (UnimplementedResourceServiceHandler) Create(context.Context, *v1.CreateRequest) (*v1.Resource, error) {

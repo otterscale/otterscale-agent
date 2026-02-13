@@ -27,12 +27,18 @@ const (
 type WatchEvent_Type int32
 
 const (
+	// Unspecified event type (default zero value).
 	WatchEvent_TYPE_UNSPECIFIED WatchEvent_Type = 0
-	WatchEvent_TYPE_ADDED       WatchEvent_Type = 1
-	WatchEvent_TYPE_MODIFIED    WatchEvent_Type = 2
-	WatchEvent_TYPE_DELETED     WatchEvent_Type = 3
-	WatchEvent_TYPE_BOOKMARK    WatchEvent_Type = 4
-	WatchEvent_TYPE_ERROR       WatchEvent_Type = 5
+	// A resource was added.
+	WatchEvent_TYPE_ADDED WatchEvent_Type = 1
+	// A resource was modified.
+	WatchEvent_TYPE_MODIFIED WatchEvent_Type = 2
+	// A resource was deleted.
+	WatchEvent_TYPE_DELETED WatchEvent_Type = 3
+	// A bookmark event carrying only a resourceVersion (no resource payload).
+	WatchEvent_TYPE_BOOKMARK WatchEvent_Type = 4
+	// An error occurred on the server side.
+	WatchEvent_TYPE_ERROR WatchEvent_Type = 5
 )
 
 // Enum value maps for WatchEvent_Type.
@@ -275,12 +281,19 @@ func (x *APIResource) ClearNamespaced() {
 type APIResource_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
-	Group      *string
-	Version    *string
-	Resource   *string
-	Kind       *string
+	// Kubernetes API Group (e.g., "apps" for Deployments, "" for core resources).
+	Group *string
+	// Kubernetes API Version (e.g., "v1").
+	Version *string
+	// Resource name in plural (e.g., "pods", "deployments").
+	Resource *string
+	// The kind of the resource (e.g., "Pod", "Deployment").
+	Kind *string
+	// Whether this resource is namespace-scoped.
 	Namespaced *bool
-	Verbs      []string
+	// The list of supported verbs (e.g., "get", "list", "create", "delete").
+	Verbs []string
+	// Abbreviated aliases for the resource (e.g., "deploy" for deployments).
 	ShortNames []string
 }
 
@@ -454,7 +467,7 @@ func (b0 DiscoveryResponse_builder) Build() *DiscoveryResponse {
 	return m0
 }
 
-// SchemaRequest defines the parameters to retrieve the schema of a specific GVR.
+// SchemaRequest defines the parameters to retrieve the schema of a specific GVK.
 type SchemaRequest struct {
 	state                  protoimpl.MessageState `protogen:"opaque.v1"`
 	xxx_hidden_Cluster     *string                `protobuf:"bytes,1,opt,name=cluster"`
@@ -609,7 +622,7 @@ type SchemaRequest_builder struct {
 	Group *string
 	// Kubernetes API Version (e.g., "v1").
 	Version *string
-	// Kubernetes API Kind (e,g, "Pod").
+	// Kubernetes API Kind (e.g., "Pod").
 	Kind *string
 }
 
@@ -1423,12 +1436,18 @@ func (x *GetRequest) ClearName() {
 type GetRequest_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
-	Cluster   *string
-	Group     *string
-	Version   *string
-	Resource  *string
+	// The target Kubernetes cluster identifier.
+	Cluster *string
+	// Kubernetes API Group (e.g., "apps" for Deployments, "" for core resources like Pods).
+	Group *string
+	// Kubernetes API Version (e.g., "v1").
+	Version *string
+	// Kubernetes API Resource name in plural (e.g., "pods", "deployments").
+	Resource *string
+	// The namespace of the resource.
 	Namespace *string
-	Name      *string
+	// The name of the resource.
+	Name *string
 }
 
 func (b0 GetRequest_builder) Build() *GetRequest {
@@ -1462,6 +1481,344 @@ func (b0 GetRequest_builder) Build() *GetRequest {
 	return m0
 }
 
+// DescribeRequest defines the parameters to describe a resource, retrieving
+// it along with its related Kubernetes events. Equivalent to `kubectl describe`.
+type DescribeRequest struct {
+	state                  protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Cluster     *string                `protobuf:"bytes,1,opt,name=cluster"`
+	xxx_hidden_Group       *string                `protobuf:"bytes,2,opt,name=group"`
+	xxx_hidden_Version     *string                `protobuf:"bytes,3,opt,name=version"`
+	xxx_hidden_Resource    *string                `protobuf:"bytes,4,opt,name=resource"`
+	xxx_hidden_Namespace   *string                `protobuf:"bytes,5,opt,name=namespace"`
+	xxx_hidden_Name        *string                `protobuf:"bytes,6,opt,name=name"`
+	XXX_raceDetectHookData protoimpl.RaceDetectHookData
+	XXX_presence           [1]uint32
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
+}
+
+func (x *DescribeRequest) Reset() {
+	*x = DescribeRequest{}
+	mi := &file_api_resource_v1_resource_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DescribeRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DescribeRequest) ProtoMessage() {}
+
+func (x *DescribeRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_api_resource_v1_resource_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+func (x *DescribeRequest) GetCluster() string {
+	if x != nil {
+		if x.xxx_hidden_Cluster != nil {
+			return *x.xxx_hidden_Cluster
+		}
+		return ""
+	}
+	return ""
+}
+
+func (x *DescribeRequest) GetGroup() string {
+	if x != nil {
+		if x.xxx_hidden_Group != nil {
+			return *x.xxx_hidden_Group
+		}
+		return ""
+	}
+	return ""
+}
+
+func (x *DescribeRequest) GetVersion() string {
+	if x != nil {
+		if x.xxx_hidden_Version != nil {
+			return *x.xxx_hidden_Version
+		}
+		return ""
+	}
+	return ""
+}
+
+func (x *DescribeRequest) GetResource() string {
+	if x != nil {
+		if x.xxx_hidden_Resource != nil {
+			return *x.xxx_hidden_Resource
+		}
+		return ""
+	}
+	return ""
+}
+
+func (x *DescribeRequest) GetNamespace() string {
+	if x != nil {
+		if x.xxx_hidden_Namespace != nil {
+			return *x.xxx_hidden_Namespace
+		}
+		return ""
+	}
+	return ""
+}
+
+func (x *DescribeRequest) GetName() string {
+	if x != nil {
+		if x.xxx_hidden_Name != nil {
+			return *x.xxx_hidden_Name
+		}
+		return ""
+	}
+	return ""
+}
+
+func (x *DescribeRequest) SetCluster(v string) {
+	x.xxx_hidden_Cluster = &v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 0, 6)
+}
+
+func (x *DescribeRequest) SetGroup(v string) {
+	x.xxx_hidden_Group = &v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 1, 6)
+}
+
+func (x *DescribeRequest) SetVersion(v string) {
+	x.xxx_hidden_Version = &v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 2, 6)
+}
+
+func (x *DescribeRequest) SetResource(v string) {
+	x.xxx_hidden_Resource = &v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 3, 6)
+}
+
+func (x *DescribeRequest) SetNamespace(v string) {
+	x.xxx_hidden_Namespace = &v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 4, 6)
+}
+
+func (x *DescribeRequest) SetName(v string) {
+	x.xxx_hidden_Name = &v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 5, 6)
+}
+
+func (x *DescribeRequest) HasCluster() bool {
+	if x == nil {
+		return false
+	}
+	return protoimpl.X.Present(&(x.XXX_presence[0]), 0)
+}
+
+func (x *DescribeRequest) HasGroup() bool {
+	if x == nil {
+		return false
+	}
+	return protoimpl.X.Present(&(x.XXX_presence[0]), 1)
+}
+
+func (x *DescribeRequest) HasVersion() bool {
+	if x == nil {
+		return false
+	}
+	return protoimpl.X.Present(&(x.XXX_presence[0]), 2)
+}
+
+func (x *DescribeRequest) HasResource() bool {
+	if x == nil {
+		return false
+	}
+	return protoimpl.X.Present(&(x.XXX_presence[0]), 3)
+}
+
+func (x *DescribeRequest) HasNamespace() bool {
+	if x == nil {
+		return false
+	}
+	return protoimpl.X.Present(&(x.XXX_presence[0]), 4)
+}
+
+func (x *DescribeRequest) HasName() bool {
+	if x == nil {
+		return false
+	}
+	return protoimpl.X.Present(&(x.XXX_presence[0]), 5)
+}
+
+func (x *DescribeRequest) ClearCluster() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 0)
+	x.xxx_hidden_Cluster = nil
+}
+
+func (x *DescribeRequest) ClearGroup() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 1)
+	x.xxx_hidden_Group = nil
+}
+
+func (x *DescribeRequest) ClearVersion() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 2)
+	x.xxx_hidden_Version = nil
+}
+
+func (x *DescribeRequest) ClearResource() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 3)
+	x.xxx_hidden_Resource = nil
+}
+
+func (x *DescribeRequest) ClearNamespace() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 4)
+	x.xxx_hidden_Namespace = nil
+}
+
+func (x *DescribeRequest) ClearName() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 5)
+	x.xxx_hidden_Name = nil
+}
+
+type DescribeRequest_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// The target Kubernetes cluster identifier.
+	Cluster *string
+	// Kubernetes API Group (e.g., "apps" for Deployments, "" for core resources like Pods).
+	Group *string
+	// Kubernetes API Version (e.g., "v1").
+	Version *string
+	// Kubernetes API Resource name in plural (e.g., "pods", "deployments").
+	Resource *string
+	// The namespace of the resource.
+	Namespace *string
+	// The name of the resource.
+	Name *string
+}
+
+func (b0 DescribeRequest_builder) Build() *DescribeRequest {
+	m0 := &DescribeRequest{}
+	b, x := &b0, m0
+	_, _ = b, x
+	if b.Cluster != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 0, 6)
+		x.xxx_hidden_Cluster = b.Cluster
+	}
+	if b.Group != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 1, 6)
+		x.xxx_hidden_Group = b.Group
+	}
+	if b.Version != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 2, 6)
+		x.xxx_hidden_Version = b.Version
+	}
+	if b.Resource != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 3, 6)
+		x.xxx_hidden_Resource = b.Resource
+	}
+	if b.Namespace != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 4, 6)
+		x.xxx_hidden_Namespace = b.Namespace
+	}
+	if b.Name != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 5, 6)
+		x.xxx_hidden_Name = b.Name
+	}
+	return m0
+}
+
+// DescribeResponse contains the resource and its related Kubernetes events.
+type DescribeResponse struct {
+	state               protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Resource *Resource              `protobuf:"bytes,1,opt,name=resource"`
+	xxx_hidden_Events   *[]*Resource           `protobuf:"bytes,2,rep,name=events"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
+}
+
+func (x *DescribeResponse) Reset() {
+	*x = DescribeResponse{}
+	mi := &file_api_resource_v1_resource_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DescribeResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DescribeResponse) ProtoMessage() {}
+
+func (x *DescribeResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_api_resource_v1_resource_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+func (x *DescribeResponse) GetResource() *Resource {
+	if x != nil {
+		return x.xxx_hidden_Resource
+	}
+	return nil
+}
+
+func (x *DescribeResponse) GetEvents() []*Resource {
+	if x != nil {
+		if x.xxx_hidden_Events != nil {
+			return *x.xxx_hidden_Events
+		}
+	}
+	return nil
+}
+
+func (x *DescribeResponse) SetResource(v *Resource) {
+	x.xxx_hidden_Resource = v
+}
+
+func (x *DescribeResponse) SetEvents(v []*Resource) {
+	x.xxx_hidden_Events = &v
+}
+
+func (x *DescribeResponse) HasResource() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_Resource != nil
+}
+
+func (x *DescribeResponse) ClearResource() {
+	x.xxx_hidden_Resource = nil
+}
+
+type DescribeResponse_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// The full resource object.
+	Resource *Resource
+	// Kubernetes events related to this resource, filtered by involvedObject.uid.
+	Events []*Resource
+}
+
+func (b0 DescribeResponse_builder) Build() *DescribeResponse {
+	m0 := &DescribeResponse{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Resource = b.Resource
+	x.xxx_hidden_Events = &b.Events
+	return m0
+}
+
 // CreateRequest defines the parameters for creating a new object.
 type CreateRequest struct {
 	state                  protoimpl.MessageState `protogen:"opaque.v1"`
@@ -1479,7 +1836,7 @@ type CreateRequest struct {
 
 func (x *CreateRequest) Reset() {
 	*x = CreateRequest{}
-	mi := &file_api_resource_v1_resource_proto_msgTypes[8]
+	mi := &file_api_resource_v1_resource_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1491,7 +1848,7 @@ func (x *CreateRequest) String() string {
 func (*CreateRequest) ProtoMessage() {}
 
 func (x *CreateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_resource_v1_resource_proto_msgTypes[8]
+	mi := &file_api_resource_v1_resource_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1667,10 +2024,15 @@ func (x *CreateRequest) ClearManifest() {
 type CreateRequest_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
-	Cluster   *string
-	Group     *string
-	Version   *string
-	Resource  *string
+	// The target Kubernetes cluster identifier.
+	Cluster *string
+	// Kubernetes API Group (e.g., "apps" for Deployments, "" for core resources like Pods).
+	Group *string
+	// Kubernetes API Version (e.g., "v1").
+	Version *string
+	// Kubernetes API Resource name in plural (e.g., "pods", "deployments").
+	Resource *string
+	// The namespace of the resource.
 	Namespace *string
 	// The full manifest of the object to be created in YAML format.
 	Manifest []byte
@@ -1727,7 +2089,7 @@ type ApplyRequest struct {
 
 func (x *ApplyRequest) Reset() {
 	*x = ApplyRequest{}
-	mi := &file_api_resource_v1_resource_proto_msgTypes[9]
+	mi := &file_api_resource_v1_resource_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1739,7 +2101,7 @@ func (x *ApplyRequest) String() string {
 func (*ApplyRequest) ProtoMessage() {}
 
 func (x *ApplyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_resource_v1_resource_proto_msgTypes[9]
+	mi := &file_api_resource_v1_resource_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1993,15 +2355,22 @@ func (x *ApplyRequest) ClearFieldManager() {
 type ApplyRequest_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
-	Cluster   *string
-	Group     *string
-	Version   *string
-	Resource  *string
+	// The target Kubernetes cluster identifier.
+	Cluster *string
+	// Kubernetes API Group (e.g., "apps" for Deployments, "" for core resources like Pods).
+	Group *string
+	// Kubernetes API Version (e.g., "v1").
+	Version *string
+	// Kubernetes API Resource name in plural (e.g., "pods", "deployments").
+	Resource *string
+	// The namespace of the resource.
 	Namespace *string
-	Name      *string
+	// The name of the resource.
+	Name *string
 	// A partial or YAML manifest in JSON format to be merged by the API server.
 	Manifest []byte
-	Force    *bool
+	// If true, conflicts are resolved in favour of the caller's field manager.
+	Force *bool
 	// Identifies the entity managing the fields (e.g., "otterscale-web-ui"). Required for SSA.
 	FieldManager *string
 }
@@ -2067,7 +2436,7 @@ type DeleteRequest struct {
 
 func (x *DeleteRequest) Reset() {
 	*x = DeleteRequest{}
-	mi := &file_api_resource_v1_resource_proto_msgTypes[10]
+	mi := &file_api_resource_v1_resource_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2079,7 +2448,7 @@ func (x *DeleteRequest) String() string {
 func (*DeleteRequest) ProtoMessage() {}
 
 func (x *DeleteRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_resource_v1_resource_proto_msgTypes[10]
+	mi := &file_api_resource_v1_resource_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2279,12 +2648,19 @@ func (x *DeleteRequest) ClearGracePeriodSeconds() {
 type DeleteRequest_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
-	Cluster            *string
-	Group              *string
-	Version            *string
-	Resource           *string
-	Namespace          *string
-	Name               *string
+	// The target Kubernetes cluster identifier.
+	Cluster *string
+	// Kubernetes API Group (e.g., "apps" for Deployments, "" for core resources like Pods).
+	Group *string
+	// Kubernetes API Version (e.g., "v1").
+	Version *string
+	// Kubernetes API Resource name in plural (e.g., "pods", "deployments").
+	Resource *string
+	// The namespace of the resource.
+	Namespace *string
+	// The name of the resource.
+	Name *string
+	// The duration in seconds before the object should be deleted. Overrides the default grace period.
 	GracePeriodSeconds *int64
 }
 
@@ -2342,7 +2718,7 @@ type WatchRequest struct {
 
 func (x *WatchRequest) Reset() {
 	*x = WatchRequest{}
-	mi := &file_api_resource_v1_resource_proto_msgTypes[11]
+	mi := &file_api_resource_v1_resource_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2354,7 +2730,7 @@ func (x *WatchRequest) String() string {
 func (*WatchRequest) ProtoMessage() {}
 
 func (x *WatchRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_resource_v1_resource_proto_msgTypes[11]
+	mi := &file_api_resource_v1_resource_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2584,12 +2960,19 @@ func (x *WatchRequest) ClearResourceVersion() {
 type WatchRequest_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
-	Cluster       *string
-	Group         *string
-	Version       *string
-	Resource      *string
-	Namespace     *string
+	// The target Kubernetes cluster identifier.
+	Cluster *string
+	// Kubernetes API Group (e.g., "apps" for Deployments, "" for core resources like Pods).
+	Group *string
+	// Kubernetes API Version (e.g., "v1").
+	Version *string
+	// Kubernetes API Resource name in plural (e.g., "pods", "deployments").
+	Resource *string
+	// The namespace to watch.
+	Namespace *string
+	// A selector to restrict watched objects by their labels.
 	LabelSelector *string
+	// A selector to restrict watched objects by their fields.
 	FieldSelector *string
 	// Start the watch from this specific resource version.
 	ResourceVersion *string
@@ -2648,7 +3031,7 @@ type WatchEvent struct {
 
 func (x *WatchEvent) Reset() {
 	*x = WatchEvent{}
-	mi := &file_api_resource_v1_resource_proto_msgTypes[12]
+	mi := &file_api_resource_v1_resource_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2660,7 +3043,7 @@ func (x *WatchEvent) String() string {
 func (*WatchEvent) ProtoMessage() {}
 
 func (x *WatchEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_api_resource_v1_resource_proto_msgTypes[12]
+	mi := &file_api_resource_v1_resource_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2822,7 +3205,17 @@ const file_api_resource_v1_resource_proto_rawDesc = "" +
 	"\aversion\x18\x03 \x01(\tR\aversion\x12\x1a\n" +
 	"\bresource\x18\x04 \x01(\tR\bresource\x12\x1c\n" +
 	"\tnamespace\x18\x05 \x01(\tR\tnamespace\x12\x12\n" +
-	"\x04name\x18\x06 \x01(\tR\x04name\"\xaf\x01\n" +
+	"\x04name\x18\x06 \x01(\tR\x04name\"\xa9\x01\n" +
+	"\x0fDescribeRequest\x12\x18\n" +
+	"\acluster\x18\x01 \x01(\tR\acluster\x12\x14\n" +
+	"\x05group\x18\x02 \x01(\tR\x05group\x12\x18\n" +
+	"\aversion\x18\x03 \x01(\tR\aversion\x12\x1a\n" +
+	"\bresource\x18\x04 \x01(\tR\bresource\x12\x1c\n" +
+	"\tnamespace\x18\x05 \x01(\tR\tnamespace\x12\x12\n" +
+	"\x04name\x18\x06 \x01(\tR\x04name\"\x8a\x01\n" +
+	"\x10DescribeResponse\x12<\n" +
+	"\bresource\x18\x01 \x01(\v2 .otterscale.resource.v1.ResourceR\bresource\x128\n" +
+	"\x06events\x18\x02 \x03(\v2 .otterscale.resource.v1.ResourceR\x06events\"\xaf\x01\n" +
 	"\rCreateRequest\x12\x18\n" +
 	"\acluster\x18\x01 \x01(\tR\acluster\x12\x14\n" +
 	"\x05group\x18\x02 \x01(\tR\x05group\x12\x18\n" +
@@ -2870,7 +3263,7 @@ const file_api_resource_v1_resource_proto_rawDesc = "" +
 	"\fTYPE_DELETED\x10\x03\x12\x11\n" +
 	"\rTYPE_BOOKMARK\x10\x04\x12\x0e\n" +
 	"\n" +
-	"TYPE_ERROR\x10\x052\xe7\x06\n" +
+	"TYPE_ERROR\x10\x052\xdf\a\n" +
 	"\x0fResourceService\x12y\n" +
 	"\tDiscovery\x12(.otterscale.resource.v1.DiscoveryRequest\x1a).otterscale.resource.v1.DiscoveryResponse\"\x17\x8a\xdf\xd5\x1d\x12\n" +
 	"\x10resource-enabled\x12a\n" +
@@ -2879,6 +3272,8 @@ const file_api_resource_v1_resource_proto_rawDesc = "" +
 	"\x04List\x12#.otterscale.resource.v1.ListRequest\x1a$.otterscale.resource.v1.ListResponse\"\x17\x8a\xdf\xd5\x1d\x12\n" +
 	"\x10resource-enabled\x12d\n" +
 	"\x03Get\x12\".otterscale.resource.v1.GetRequest\x1a .otterscale.resource.v1.Resource\"\x17\x8a\xdf\xd5\x1d\x12\n" +
+	"\x10resource-enabled\x12v\n" +
+	"\bDescribe\x12'.otterscale.resource.v1.DescribeRequest\x1a(.otterscale.resource.v1.DescribeResponse\"\x17\x8a\xdf\xd5\x1d\x12\n" +
 	"\x10resource-enabled\x12j\n" +
 	"\x06Create\x12%.otterscale.resource.v1.CreateRequest\x1a .otterscale.resource.v1.Resource\"\x17\x8a\xdf\xd5\x1d\x12\n" +
 	"\x10resource-enabled\x12h\n" +
@@ -2890,7 +3285,7 @@ const file_api_resource_v1_resource_proto_rawDesc = "" +
 	"\x10resource-enabled0\x01B;Z9github.com/otterscale/otterscale-agent/api/resource/v1;pbb\beditionsp\xe8\a"
 
 var file_api_resource_v1_resource_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_api_resource_v1_resource_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
+var file_api_resource_v1_resource_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_api_resource_v1_resource_proto_goTypes = []any{
 	(WatchEvent_Type)(0),      // 0: otterscale.resource.v1.WatchEvent.Type
 	(*APIResource)(nil),       // 1: otterscale.resource.v1.APIResource
@@ -2901,41 +3296,47 @@ var file_api_resource_v1_resource_proto_goTypes = []any{
 	(*ListRequest)(nil),       // 6: otterscale.resource.v1.ListRequest
 	(*ListResponse)(nil),      // 7: otterscale.resource.v1.ListResponse
 	(*GetRequest)(nil),        // 8: otterscale.resource.v1.GetRequest
-	(*CreateRequest)(nil),     // 9: otterscale.resource.v1.CreateRequest
-	(*ApplyRequest)(nil),      // 10: otterscale.resource.v1.ApplyRequest
-	(*DeleteRequest)(nil),     // 11: otterscale.resource.v1.DeleteRequest
-	(*WatchRequest)(nil),      // 12: otterscale.resource.v1.WatchRequest
-	(*WatchEvent)(nil),        // 13: otterscale.resource.v1.WatchEvent
-	(*structpb.Struct)(nil),   // 14: google.protobuf.Struct
-	(*emptypb.Empty)(nil),     // 15: google.protobuf.Empty
+	(*DescribeRequest)(nil),   // 9: otterscale.resource.v1.DescribeRequest
+	(*DescribeResponse)(nil),  // 10: otterscale.resource.v1.DescribeResponse
+	(*CreateRequest)(nil),     // 11: otterscale.resource.v1.CreateRequest
+	(*ApplyRequest)(nil),      // 12: otterscale.resource.v1.ApplyRequest
+	(*DeleteRequest)(nil),     // 13: otterscale.resource.v1.DeleteRequest
+	(*WatchRequest)(nil),      // 14: otterscale.resource.v1.WatchRequest
+	(*WatchEvent)(nil),        // 15: otterscale.resource.v1.WatchEvent
+	(*structpb.Struct)(nil),   // 16: google.protobuf.Struct
+	(*emptypb.Empty)(nil),     // 17: google.protobuf.Empty
 }
 var file_api_resource_v1_resource_proto_depIdxs = []int32{
 	1,  // 0: otterscale.resource.v1.DiscoveryResponse.api_resources:type_name -> otterscale.resource.v1.APIResource
-	14, // 1: otterscale.resource.v1.Resource.object:type_name -> google.protobuf.Struct
+	16, // 1: otterscale.resource.v1.Resource.object:type_name -> google.protobuf.Struct
 	5,  // 2: otterscale.resource.v1.ListResponse.items:type_name -> otterscale.resource.v1.Resource
-	0,  // 3: otterscale.resource.v1.WatchEvent.type:type_name -> otterscale.resource.v1.WatchEvent.Type
-	5,  // 4: otterscale.resource.v1.WatchEvent.resource:type_name -> otterscale.resource.v1.Resource
-	2,  // 5: otterscale.resource.v1.ResourceService.Discovery:input_type -> otterscale.resource.v1.DiscoveryRequest
-	4,  // 6: otterscale.resource.v1.ResourceService.Schema:input_type -> otterscale.resource.v1.SchemaRequest
-	6,  // 7: otterscale.resource.v1.ResourceService.List:input_type -> otterscale.resource.v1.ListRequest
-	8,  // 8: otterscale.resource.v1.ResourceService.Get:input_type -> otterscale.resource.v1.GetRequest
-	9,  // 9: otterscale.resource.v1.ResourceService.Create:input_type -> otterscale.resource.v1.CreateRequest
-	10, // 10: otterscale.resource.v1.ResourceService.Apply:input_type -> otterscale.resource.v1.ApplyRequest
-	11, // 11: otterscale.resource.v1.ResourceService.Delete:input_type -> otterscale.resource.v1.DeleteRequest
-	12, // 12: otterscale.resource.v1.ResourceService.Watch:input_type -> otterscale.resource.v1.WatchRequest
-	3,  // 13: otterscale.resource.v1.ResourceService.Discovery:output_type -> otterscale.resource.v1.DiscoveryResponse
-	14, // 14: otterscale.resource.v1.ResourceService.Schema:output_type -> google.protobuf.Struct
-	7,  // 15: otterscale.resource.v1.ResourceService.List:output_type -> otterscale.resource.v1.ListResponse
-	5,  // 16: otterscale.resource.v1.ResourceService.Get:output_type -> otterscale.resource.v1.Resource
-	5,  // 17: otterscale.resource.v1.ResourceService.Create:output_type -> otterscale.resource.v1.Resource
-	5,  // 18: otterscale.resource.v1.ResourceService.Apply:output_type -> otterscale.resource.v1.Resource
-	15, // 19: otterscale.resource.v1.ResourceService.Delete:output_type -> google.protobuf.Empty
-	13, // 20: otterscale.resource.v1.ResourceService.Watch:output_type -> otterscale.resource.v1.WatchEvent
-	13, // [13:21] is the sub-list for method output_type
-	5,  // [5:13] is the sub-list for method input_type
-	5,  // [5:5] is the sub-list for extension type_name
-	5,  // [5:5] is the sub-list for extension extendee
-	0,  // [0:5] is the sub-list for field type_name
+	5,  // 3: otterscale.resource.v1.DescribeResponse.resource:type_name -> otterscale.resource.v1.Resource
+	5,  // 4: otterscale.resource.v1.DescribeResponse.events:type_name -> otterscale.resource.v1.Resource
+	0,  // 5: otterscale.resource.v1.WatchEvent.type:type_name -> otterscale.resource.v1.WatchEvent.Type
+	5,  // 6: otterscale.resource.v1.WatchEvent.resource:type_name -> otterscale.resource.v1.Resource
+	2,  // 7: otterscale.resource.v1.ResourceService.Discovery:input_type -> otterscale.resource.v1.DiscoveryRequest
+	4,  // 8: otterscale.resource.v1.ResourceService.Schema:input_type -> otterscale.resource.v1.SchemaRequest
+	6,  // 9: otterscale.resource.v1.ResourceService.List:input_type -> otterscale.resource.v1.ListRequest
+	8,  // 10: otterscale.resource.v1.ResourceService.Get:input_type -> otterscale.resource.v1.GetRequest
+	9,  // 11: otterscale.resource.v1.ResourceService.Describe:input_type -> otterscale.resource.v1.DescribeRequest
+	11, // 12: otterscale.resource.v1.ResourceService.Create:input_type -> otterscale.resource.v1.CreateRequest
+	12, // 13: otterscale.resource.v1.ResourceService.Apply:input_type -> otterscale.resource.v1.ApplyRequest
+	13, // 14: otterscale.resource.v1.ResourceService.Delete:input_type -> otterscale.resource.v1.DeleteRequest
+	14, // 15: otterscale.resource.v1.ResourceService.Watch:input_type -> otterscale.resource.v1.WatchRequest
+	3,  // 16: otterscale.resource.v1.ResourceService.Discovery:output_type -> otterscale.resource.v1.DiscoveryResponse
+	16, // 17: otterscale.resource.v1.ResourceService.Schema:output_type -> google.protobuf.Struct
+	7,  // 18: otterscale.resource.v1.ResourceService.List:output_type -> otterscale.resource.v1.ListResponse
+	5,  // 19: otterscale.resource.v1.ResourceService.Get:output_type -> otterscale.resource.v1.Resource
+	10, // 20: otterscale.resource.v1.ResourceService.Describe:output_type -> otterscale.resource.v1.DescribeResponse
+	5,  // 21: otterscale.resource.v1.ResourceService.Create:output_type -> otterscale.resource.v1.Resource
+	5,  // 22: otterscale.resource.v1.ResourceService.Apply:output_type -> otterscale.resource.v1.Resource
+	17, // 23: otterscale.resource.v1.ResourceService.Delete:output_type -> google.protobuf.Empty
+	15, // 24: otterscale.resource.v1.ResourceService.Watch:output_type -> otterscale.resource.v1.WatchEvent
+	16, // [16:25] is the sub-list for method output_type
+	7,  // [7:16] is the sub-list for method input_type
+	7,  // [7:7] is the sub-list for extension type_name
+	7,  // [7:7] is the sub-list for extension extendee
+	0,  // [0:7] is the sub-list for field type_name
 }
 
 func init() { file_api_resource_v1_resource_proto_init() }
@@ -2949,7 +3350,7 @@ func file_api_resource_v1_resource_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_resource_v1_resource_proto_rawDesc), len(file_api_resource_v1_resource_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   13,
+			NumMessages:   15,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -19,6 +19,10 @@ import (
 	"k8s.io/kube-openapi/pkg/validation/spec"
 )
 
+// ---------------------------------------------------------------------------
+// Interfaces
+// ---------------------------------------------------------------------------
+
 // DiscoveryClient abstracts Kubernetes API discovery so that the
 // use-case layer can validate resources and fetch schemas without
 // depending on a concrete client implementation.
@@ -39,13 +43,49 @@ type DiscoveryClient interface {
 // that the underlying implementation can route requests through the
 // correct tunnel.
 type ResourceRepo interface {
-	List(ctx context.Context, cluster string, gvr schema.GroupVersionResource, namespace, labelSelector, fieldSelector string, limit int64, continueToken string) (*unstructured.UnstructuredList, error)
-	Get(ctx context.Context, cluster string, gvr schema.GroupVersionResource, namespace, name string) (*unstructured.Unstructured, error)
-	Create(ctx context.Context, cluster string, gvr schema.GroupVersionResource, namespace string, obj *unstructured.Unstructured) (*unstructured.Unstructured, error)
-	Apply(ctx context.Context, cluster string, gvr schema.GroupVersionResource, namespace, name string, data []byte, force bool, fieldManager string) (*unstructured.Unstructured, error)
-	Delete(ctx context.Context, cluster string, gvr schema.GroupVersionResource, namespace, name string, gracePeriodSeconds *int64) error
-	Watch(ctx context.Context, cluster string, gvr schema.GroupVersionResource, namespace, labelSelector, fieldSelector, resourceVersion string, sendInitialEvents bool) (watch.Interface, error)
+	// List returns a paged list of resources matching the given selectors.
+	List(ctx context.Context, cluster string, gvr schema.GroupVersionResource,
+		namespace, labelSelector, fieldSelector string,
+		limit int64, continueToken string,
+	) (*unstructured.UnstructuredList, error)
+
+	// Get returns a single resource by name.
+	Get(ctx context.Context, cluster string, gvr schema.GroupVersionResource,
+		namespace, name string,
+	) (*unstructured.Unstructured, error)
+
+	// Create creates a new resource from the given object.
+	Create(ctx context.Context, cluster string, gvr schema.GroupVersionResource,
+		namespace string, obj *unstructured.Unstructured,
+	) (*unstructured.Unstructured, error)
+
+	// Apply performs a server-side apply (PATCH with ApplyPatchType) for
+	// the given resource.
+	Apply(ctx context.Context, cluster string, gvr schema.GroupVersionResource,
+		namespace, name string, data []byte, force bool, fieldManager string,
+	) (*unstructured.Unstructured, error)
+
+	// Delete removes a resource. An optional gracePeriodSeconds overrides
+	// the default deletion grace period.
+	Delete(ctx context.Context, cluster string, gvr schema.GroupVersionResource,
+		namespace, name string, gracePeriodSeconds *int64,
+	) error
+
+	// Watch opens a long-lived watch stream for resources matching the
+	// given selectors.
+	Watch(ctx context.Context, cluster string, gvr schema.GroupVersionResource,
+		namespace, labelSelector, fieldSelector, resourceVersion string,
+		sendInitialEvents bool,
+	) (watch.Interface, error)
+
+	// ListEvents returns events matching the given field selector
+	// (e.g., involvedObject.uid=xxx). Used by DescribeResource.
+	ListEvents(ctx context.Context, cluster, namespace, fieldSelector string) (*unstructured.UnstructuredList, error)
 }
+
+// ---------------------------------------------------------------------------
+// Cache types
+// ---------------------------------------------------------------------------
 
 // schemaCacheTTL controls how long resolved OpenAPI schemas are kept
 // in memory before being re-fetched from the cluster.
@@ -66,6 +106,10 @@ type versionCacheEntry struct {
 	version   *version.Info
 	expiresAt time.Time
 }
+
+// ---------------------------------------------------------------------------
+// Use case
+// ---------------------------------------------------------------------------
 
 // ResourceUseCase provides the application-level API for managing
 // Kubernetes resources across multiple clusters. It validates GVRs
@@ -102,7 +146,10 @@ func (uc *ResourceUseCase) ServerResources(ctx context.Context, cluster string) 
 // ResolveSchema fetches the OpenAPI schema for the given GVK. Results
 // are cached for schemaCacheTTL and concurrent requests for the same
 // key are deduplicated via singleflight.
-func (uc *ResourceUseCase) ResolveSchema(ctx context.Context, cluster, group, version, kind string) (*spec.Schema, error) {
+func (uc *ResourceUseCase) ResolveSchema(
+	ctx context.Context,
+	cluster, group, version, kind string,
+) (*spec.Schema, error) {
 	key := uc.schemaCacheKey(cluster, group, version, kind)
 
 	uc.mu.RLock()
@@ -138,7 +185,13 @@ func (uc *ResourceUseCase) ResolveSchema(ctx context.Context, cluster, group, ve
 
 // ListResources validates the GVR, fetches a paged resource list, and
 // strips noisy metadata from each item before returning.
-func (uc *ResourceUseCase) ListResources(ctx context.Context, cluster, group, version, resource, namespace, labelSelector, fieldSelector string, limit int64, continueToken string) (*unstructured.UnstructuredList, error) {
+func (uc *ResourceUseCase) ListResources(
+	ctx context.Context,
+	cluster, group, version, resource, namespace string,
+	labelSelector, fieldSelector string,
+	limit int64,
+	continueToken string,
+) (*unstructured.UnstructuredList, error) {
 	gvr, err := uc.discovery.LookupResource(ctx, cluster, group, version, resource)
 	if err != nil {
 		return nil, err
@@ -157,7 +210,10 @@ func (uc *ResourceUseCase) ListResources(ctx context.Context, cluster, group, ve
 }
 
 // GetResource validates the GVR and fetches a single resource.
-func (uc *ResourceUseCase) GetResource(ctx context.Context, cluster, group, version, resource, namespace, name string) (*unstructured.Unstructured, error) {
+func (uc *ResourceUseCase) GetResource(
+	ctx context.Context,
+	cluster, group, version, resource, namespace, name string,
+) (*unstructured.Unstructured, error) {
 	gvr, err := uc.discovery.LookupResource(ctx, cluster, group, version, resource)
 	if err != nil {
 		return nil, err
@@ -166,9 +222,44 @@ func (uc *ResourceUseCase) GetResource(ctx context.Context, cluster, group, vers
 	return uc.resource.Get(ctx, cluster, gvr, namespace, name)
 }
 
+// DescribeResource validates the GVR, fetches the resource, extracts
+// its UID, then queries related Kubernetes events filtered by
+// involvedObject.uid. This is the backend equivalent of
+// `kubectl describe`.
+func (uc *ResourceUseCase) DescribeResource(
+	ctx context.Context,
+	cluster, group, version, resource, namespace, name string,
+) (*unstructured.Unstructured, *unstructured.UnstructuredList, error) {
+	gvr, err := uc.discovery.LookupResource(ctx, cluster, group, version, resource)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	obj, err := uc.resource.Get(ctx, cluster, gvr, namespace, name)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	uid := string(obj.GetUID())
+	fieldSelector := fmt.Sprintf("involvedObject.uid=%s", uid)
+
+	events, err := uc.resource.ListEvents(ctx, cluster, namespace, fieldSelector)
+	if err != nil {
+		// Events are supplementary; return the resource even if event
+		// listing fails (e.g. RBAC restrictions on events).
+		return obj, &unstructured.UnstructuredList{}, nil
+	}
+
+	return obj, events, nil
+}
+
 // CreateResource validates the GVR, decodes the YAML manifest, and
 // creates the resource on the target cluster.
-func (uc *ResourceUseCase) CreateResource(ctx context.Context, cluster, group, version, resource, namespace string, manifest []byte) (*unstructured.Unstructured, error) {
+func (uc *ResourceUseCase) CreateResource(
+	ctx context.Context,
+	cluster, group, version, resource, namespace string,
+	manifest []byte,
+) (*unstructured.Unstructured, error) {
 	gvr, err := uc.discovery.LookupResource(ctx, cluster, group, version, resource)
 	if err != nil {
 		return nil, err
@@ -184,7 +275,13 @@ func (uc *ResourceUseCase) CreateResource(ctx context.Context, cluster, group, v
 
 // ApplyResource validates the GVR, decodes the YAML manifest, and
 // performs a server-side apply on the target cluster.
-func (uc *ResourceUseCase) ApplyResource(ctx context.Context, cluster, group, version, resource, namespace, name string, manifest []byte, force bool, fieldManager string) (*unstructured.Unstructured, error) {
+func (uc *ResourceUseCase) ApplyResource(
+	ctx context.Context,
+	cluster, group, version, resource, namespace, name string,
+	manifest []byte,
+	force bool,
+	fieldManager string,
+) (*unstructured.Unstructured, error) {
 	gvr, err := uc.discovery.LookupResource(ctx, cluster, group, version, resource)
 	if err != nil {
 		return nil, err
@@ -204,7 +301,11 @@ func (uc *ResourceUseCase) ApplyResource(ctx context.Context, cluster, group, ve
 }
 
 // DeleteResource validates the GVR and deletes the named resource.
-func (uc *ResourceUseCase) DeleteResource(ctx context.Context, cluster, group, version, resource, namespace, name string, gracePeriodSeconds *int64) error {
+func (uc *ResourceUseCase) DeleteResource(
+	ctx context.Context,
+	cluster, group, version, resource, namespace, name string,
+	gracePeriodSeconds *int64,
+) error {
 	gvr, err := uc.discovery.LookupResource(ctx, cluster, group, version, resource)
 	if err != nil {
 		return err
@@ -216,7 +317,11 @@ func (uc *ResourceUseCase) DeleteResource(ctx context.Context, cluster, group, v
 // WatchResource validates the GVR and opens a long-lived watch stream.
 // If the cluster supports the WatchList feature (Kubernetes >= 1.34),
 // initial events are streamed before switching to change notifications.
-func (uc *ResourceUseCase) WatchResource(ctx context.Context, cluster, group, version, resource, namespace, labelSelector, fieldSelector, resourceVersion string) (watch.Interface, error) {
+func (uc *ResourceUseCase) WatchResource(
+	ctx context.Context,
+	cluster, group, version, resource, namespace string,
+	labelSelector, fieldSelector, resourceVersion string,
+) (watch.Interface, error) {
 	gvr, err := uc.discovery.LookupResource(ctx, cluster, group, version, resource)
 	if err != nil {
 		return nil, err
@@ -229,6 +334,10 @@ func (uc *ResourceUseCase) WatchResource(ctx context.Context, cluster, group, ve
 
 	return uc.resource.Watch(ctx, cluster, gvr, namespace, labelSelector, fieldSelector, resourceVersion, watchListFeature)
 }
+
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
 
 // schemaCacheKey builds a cache key from the cluster/group/version/kind tuple.
 func (uc *ResourceUseCase) schemaCacheKey(cluster, group, version, kind string) string {
