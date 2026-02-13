@@ -29,12 +29,13 @@ COPY --from=builder /workspace/bin/otterscale .
 USER 65532:65532
 
 # Set environment variable
-ENV OTTERSCALE_CONTAINER=true
+ENV OTTERSCALE_SERVER_TUNNEL_ADDRESS=0.0.0.0:8300
 
-# Expose port
-EXPOSE 8299
+# Expose ports (8299: HTTP/gRPC API, 8300: Tunnel)
+EXPOSE 8299 8300
 
 # Labels
 LABEL maintainer="Chung-Hsuan Tsai <paul_tsai@phison.com>"
 
 ENTRYPOINT ["/otterscale"]
+CMD ["server"]

@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"net/http/httputil"
 	"net/url"
 	"os"
 
+	utilproxy "k8s.io/apimachinery/pkg/util/proxy"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 )
@@ -43,16 +43,18 @@ func (h *Handler) Mount(mux *http.ServeMux) error {
 		return fmt.Errorf("failed to create rest transport: %w", err)
 	}
 
-	proxy := httputil.NewSingleHostReverseProxy(targetURL)
-	proxy.Director = func(req *http.Request) {
-		req.URL.Scheme = targetURL.Scheme
-		req.URL.Host = targetURL.Host
-		req.Host = targetURL.Host
-	}
-	proxy.Transport = transport
-
+	proxy := utilproxy.NewUpgradeAwareHandler(targetURL, transport, false, false, &errorResponder{})
 	mux.Handle("/", proxy)
 	return nil
+}
+
+// errorResponder implements k8s.io/apimachinery/pkg/util/proxy.ErrorResponder.
+// It logs errors and returns a 502 Bad Gateway response to the client.
+type errorResponder struct{}
+
+func (r *errorResponder) Error(w http.ResponseWriter, _ *http.Request, err error) {
+	slog.Error("proxy error", "error", err)
+	http.Error(w, "bad gateway", http.StatusBadGateway)
 }
 
 // newKubeConfig loads the Kubernetes client configuration. It first

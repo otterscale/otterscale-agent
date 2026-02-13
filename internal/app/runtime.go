@@ -1,0 +1,334 @@
+package app
+
+import (
+	"context"
+	"io"
+	"log/slog"
+	"time"
+
+	"connectrpc.com/connect"
+	"google.golang.org/protobuf/types/known/emptypb"
+
+	pb "github.com/otterscale/otterscale-agent/api/runtime/v1"
+	"github.com/otterscale/otterscale-agent/api/runtime/v1/pbconnect"
+	"github.com/otterscale/otterscale-agent/internal/core"
+)
+
+// streamChunkSize is the maximum bytes sent per streaming message.
+const streamChunkSize = 32 * 1024
+
+// RuntimeService implements the Runtime gRPC service. It proxies
+// Kubernetes runtime operations (logs, exec, port-forward, scale,
+// restart) through the tunnel.
+type RuntimeService struct {
+	pbconnect.UnimplementedRuntimeServiceHandler
+
+	runtime *core.RuntimeUseCase
+}
+
+// NewRuntimeService returns a RuntimeService backed by the given
+// use-case.
+func NewRuntimeService(runtime *core.RuntimeUseCase) *RuntimeService {
+	return &RuntimeService{runtime: runtime}
+}
+
+var _ pbconnect.RuntimeServiceHandler = (*RuntimeService)(nil)
+
+// ---------------------------------------------------------------------------
+// PodLog
+// ---------------------------------------------------------------------------
+
+// PodLog streams container log output to the client.
+func (s *RuntimeService) PodLog(ctx context.Context, req *pb.PodLogRequest, stream *connect.ServerStream[pb.PodLogResponse]) error {
+	opts := core.PodLogOptions{
+		Container:  req.GetContainer(),
+		Follow:     req.GetFollow(),
+		Previous:   req.GetPrevious(),
+		Timestamps: req.GetTimestamps(),
+	}
+	if req.HasTailLines() {
+		v := req.GetTailLines()
+		opts.TailLines = &v
+	}
+	if req.HasSinceSeconds() {
+		v := req.GetSinceSeconds()
+		opts.SinceSeconds = &v
+	}
+	if req.HasSinceTime() {
+		t := req.GetSinceTime().AsTime()
+		opts.SinceTime = &t
+	}
+	if req.HasLimitBytes() {
+		v := req.GetLimitBytes()
+		opts.LimitBytes = &v
+	}
+
+	reader, err := s.runtime.StartPodLogs(ctx, req.GetCluster(), req.GetNamespace(), req.GetName(), opts)
+	if err != nil {
+		return k8sErrorToConnectError(err)
+	}
+	defer reader.Close()
+
+	buf := make([]byte, streamChunkSize)
+	for {
+		n, readErr := reader.Read(buf)
+		if n > 0 {
+			msg := &pb.PodLogResponse{}
+			msg.SetData(append([]byte(nil), buf[:n]...))
+			if err := stream.Send(msg); err != nil {
+				return err
+			}
+		}
+		if readErr != nil {
+			if readErr == io.EOF {
+				return nil
+			}
+			return k8sErrorToConnectError(readErr)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// ExecuteTTY / WriteTTY / ResizeTTY
+// ---------------------------------------------------------------------------
+
+// ExecuteTTY starts an interactive exec session and streams
+// stdout/stderr back to the client. The first response message
+// contains the session_id that the client must use for WriteTTY
+// and ResizeTTY calls.
+func (s *RuntimeService) ExecuteTTY(ctx context.Context, req *pb.ExecuteTTYRequest, stream *connect.ServerStream[pb.ExecuteTTYResponse]) error {
+	sess, stdoutR, stderrR, err := s.runtime.StartExec(
+		ctx,
+		req.GetCluster(),
+		req.GetNamespace(),
+		req.GetName(),
+		req.GetContainer(),
+		req.GetCommand(),
+		req.GetTty(),
+		uint16(req.GetRows()),
+		uint16(req.GetCols()),
+	)
+	if err != nil {
+		return k8sErrorToConnectError(err)
+	}
+	defer s.runtime.CleanupExec(sess.ID)
+
+	// Send the session ID as the first message.
+	first := &pb.ExecuteTTYResponse{}
+	first.SetSessionId(sess.ID)
+	if err := stream.Send(first); err != nil {
+		return err
+	}
+
+	// Merge stdout and stderr into a single output channel.
+	ch := make(chan execChunk, 8)
+
+	// Read stdout.
+	go func() {
+		defer stdoutR.Close()
+		buf := make([]byte, streamChunkSize)
+		for {
+			n, readErr := stdoutR.Read(buf)
+			if n > 0 {
+				ch <- execChunk{stdout: append([]byte(nil), buf[:n]...)}
+			}
+			if readErr != nil {
+				return
+			}
+		}
+	}()
+
+	// Read stderr (only meaningful when TTY is false).
+	go func() {
+		defer stderrR.Close()
+		buf := make([]byte, streamChunkSize)
+		for {
+			n, readErr := stderrR.Read(buf)
+			if n > 0 {
+				ch <- execChunk{stderr: append([]byte(nil), buf[:n]...)}
+			}
+			if readErr != nil {
+				return
+			}
+		}
+	}()
+
+	// Stream chunks to the client until the exec session ends.
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+
+		case c, ok := <-ch:
+			if !ok {
+				return nil
+			}
+			msg := &pb.ExecuteTTYResponse{}
+			if len(c.stdout) > 0 {
+				msg.SetStdout(c.stdout)
+			}
+			if len(c.stderr) > 0 {
+				msg.SetStderr(c.stderr)
+			}
+			if err := stream.Send(msg); err != nil {
+				return err
+			}
+
+		case execErr := <-sess.Done:
+			// Drain remaining output before closing.
+			s.drainExecChannel(ch, stream)
+			if execErr != nil {
+				slog.Debug("exec session ended with error", "session_id", sess.ID, "error", execErr)
+			}
+			return nil
+		}
+	}
+}
+
+// execChunk holds a piece of stdout or stderr data from an exec session.
+type execChunk struct {
+	stdout []byte
+	stderr []byte
+}
+
+// drainExecChannel sends any remaining buffered chunks to the client.
+func (s *RuntimeService) drainExecChannel(ch <-chan execChunk, stream *connect.ServerStream[pb.ExecuteTTYResponse]) {
+	// Give writers a moment to flush.
+	timer := time.NewTimer(100 * time.Millisecond)
+	defer timer.Stop()
+
+	for {
+		select {
+		case c, ok := <-ch:
+			if !ok {
+				return
+			}
+			msg := &pb.ExecuteTTYResponse{}
+			if len(c.stdout) > 0 {
+				msg.SetStdout(c.stdout)
+			}
+			if len(c.stderr) > 0 {
+				msg.SetStderr(c.stderr)
+			}
+			_ = stream.Send(msg)
+		case <-timer.C:
+			return
+		}
+	}
+}
+
+// WriteTTY sends stdin data to an active exec session.
+func (s *RuntimeService) WriteTTY(_ context.Context, req *pb.WriteTTYRequest) (*emptypb.Empty, error) {
+	if err := s.runtime.WriteExec(req.GetSessionId(), req.GetStdin()); err != nil {
+		return nil, k8sErrorToConnectError(err)
+	}
+	return &emptypb.Empty{}, nil
+}
+
+// ResizeTTY updates the terminal dimensions of an active exec session.
+func (s *RuntimeService) ResizeTTY(_ context.Context, req *pb.ResizeTTYRequest) (*emptypb.Empty, error) {
+	if err := s.runtime.ResizeExec(req.GetSessionId(), uint16(req.GetRows()), uint16(req.GetCols())); err != nil {
+		return nil, k8sErrorToConnectError(err)
+	}
+	return &emptypb.Empty{}, nil
+}
+
+// ---------------------------------------------------------------------------
+// PortForward / WritePortForward
+// ---------------------------------------------------------------------------
+
+// PortForward opens a port-forward session and streams data from the
+// pod back to the client. The first response message contains the
+// session_id that the client must use for WritePortForward calls.
+func (s *RuntimeService) PortForward(ctx context.Context, req *pb.PortForwardRequest, stream *connect.ServerStream[pb.PortForwardResponse]) error {
+	sess, dataOutR, err := s.runtime.StartPortForward(
+		ctx,
+		req.GetCluster(),
+		req.GetNamespace(),
+		req.GetName(),
+		req.GetPort(),
+	)
+	if err != nil {
+		return k8sErrorToConnectError(err)
+	}
+	defer s.runtime.CleanupPortForward(sess.ID)
+
+	// Send the session ID as the first message.
+	first := &pb.PortForwardResponse{}
+	first.SetSessionId(sess.ID)
+	if err := stream.Send(first); err != nil {
+		return err
+	}
+
+	// Stream data from the pod.
+	buf := make([]byte, streamChunkSize)
+	for {
+		n, readErr := dataOutR.Read(buf)
+		if n > 0 {
+			msg := &pb.PortForwardResponse{}
+			msg.SetData(append([]byte(nil), buf[:n]...))
+			if err := stream.Send(msg); err != nil {
+				return err
+			}
+		}
+		if readErr != nil {
+			if readErr == io.EOF {
+				return nil
+			}
+			return k8sErrorToConnectError(readErr)
+		}
+	}
+}
+
+// WritePortForward sends data to an active port-forward session.
+func (s *RuntimeService) WritePortForward(_ context.Context, req *pb.WritePortForwardRequest) (*emptypb.Empty, error) {
+	if err := s.runtime.WritePortForward(req.GetSessionId(), req.GetData()); err != nil {
+		return nil, k8sErrorToConnectError(err)
+	}
+	return &emptypb.Empty{}, nil
+}
+
+// ---------------------------------------------------------------------------
+// Scale
+// ---------------------------------------------------------------------------
+
+// Scale updates the replica count and returns the new value.
+func (s *RuntimeService) Scale(ctx context.Context, req *pb.ScaleRequest) (*pb.ScaleResponse, error) {
+	replicas, err := s.runtime.Scale(
+		ctx,
+		req.GetCluster(),
+		req.GetGroup(),
+		req.GetVersion(),
+		req.GetResource(),
+		req.GetNamespace(),
+		req.GetName(),
+		req.GetReplicas(),
+	)
+	if err != nil {
+		return nil, k8sErrorToConnectError(err)
+	}
+
+	resp := &pb.ScaleResponse{}
+	resp.SetReplicas(replicas)
+	return resp, nil
+}
+
+// ---------------------------------------------------------------------------
+// Restart
+// ---------------------------------------------------------------------------
+
+// Restart triggers a rolling restart of a workload.
+func (s *RuntimeService) Restart(ctx context.Context, req *pb.RestartRequest) (*emptypb.Empty, error) {
+	if err := s.runtime.Restart(
+		ctx,
+		req.GetCluster(),
+		req.GetGroup(),
+		req.GetVersion(),
+		req.GetResource(),
+		req.GetNamespace(),
+		req.GetName(),
+	); err != nil {
+		return nil, k8sErrorToConnectError(err)
+	}
+	return &emptypb.Empty{}, nil
+}

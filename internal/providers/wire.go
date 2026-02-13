@@ -18,5 +18,6 @@ var ProviderSet = wire.NewSet(
 	kubernetes.New,
 	kubernetes.NewDiscoveryClient,
 	kubernetes.NewResourceRepo,
+	kubernetes.NewRuntimeRepo,
 	otterscale.NewFleetRegistrar,
 )

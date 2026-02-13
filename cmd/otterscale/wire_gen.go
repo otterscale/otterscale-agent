@@ -45,7 +45,10 @@ func wireServer() (*server.Server, func(), error) {
 	resourceRepo := kubernetes.NewResourceRepo(kubernetesKubernetes)
 	resourceUseCase := core.NewResourceUseCase(discoveryClient, resourceRepo)
 	resourceService := app.NewResourceService(resourceUseCase)
-	handler := server.NewHandler(fleetService, resourceService)
+	runtimeRepo := kubernetes.NewRuntimeRepo(kubernetesKubernetes)
+	runtimeUseCase := core.NewRuntimeUseCase(discoveryClient, runtimeRepo)
+	runtimeService := app.NewRuntimeService(runtimeUseCase)
+	handler := server.NewHandler(fleetService, resourceService, runtimeService)
 	serverServer := server.NewServer(handler, service)
 	return serverServer, func() {
 	}, nil

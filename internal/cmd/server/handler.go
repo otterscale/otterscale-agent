@@ -16,6 +16,7 @@ import (
 
 	fleetv1 "github.com/otterscale/otterscale-agent/api/fleet/v1/pbconnect"
 	resourcev1 "github.com/otterscale/otterscale-agent/api/resource/v1/pbconnect"
+	runtimev1 "github.com/otterscale/otterscale-agent/api/runtime/v1/pbconnect"
 	"github.com/otterscale/otterscale-agent/internal/app"
 )
 
@@ -25,13 +26,15 @@ import (
 type Handler struct {
 	fleet    *app.FleetService
 	resource *app.ResourceService
+	runtime  *app.RuntimeService
 }
 
 // NewHandler returns a Handler for the given gRPC services.
-func NewHandler(fleet *app.FleetService, resource *app.ResourceService) *Handler {
+func NewHandler(fleet *app.FleetService, resource *app.ResourceService, runtime *app.RuntimeService) *Handler {
 	return &Handler{
 		fleet:    fleet,
 		resource: resource,
+		runtime:  runtime,
 	}
 }
 
@@ -52,6 +55,7 @@ func (h *Handler) Mount(mux *http.ServeMux) error {
 	services := []string{
 		fleetv1.FleetServiceName,
 		resourcev1.ResourceServiceName,
+		runtimev1.RuntimeServiceName,
 	}
 
 	if err := h.registerOpsHandlers(mux, services); err != nil {
@@ -61,6 +65,7 @@ func (h *Handler) Mount(mux *http.ServeMux) error {
 	// Application service handlers.
 	mux.Handle(fleetv1.NewFleetServiceHandler(h.fleet, interceptors))
 	mux.Handle(resourcev1.NewResourceServiceHandler(h.resource, interceptors))
+	mux.Handle(runtimev1.NewRuntimeServiceHandler(h.runtime, interceptors))
 
 	// Placeholder registrations for future features.
 	h.registerProxy(mux)
