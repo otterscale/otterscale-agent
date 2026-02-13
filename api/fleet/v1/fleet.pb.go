@@ -21,6 +21,119 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type Cluster struct {
+	state                   protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Name         *string                `protobuf:"bytes,1,opt,name=name"`
+	xxx_hidden_AgentVersion *string                `protobuf:"bytes,2,opt,name=agent_version,json=agentVersion"`
+	XXX_raceDetectHookData  protoimpl.RaceDetectHookData
+	XXX_presence            [1]uint32
+	unknownFields           protoimpl.UnknownFields
+	sizeCache               protoimpl.SizeCache
+}
+
+func (x *Cluster) Reset() {
+	*x = Cluster{}
+	mi := &file_api_fleet_v1_fleet_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Cluster) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Cluster) ProtoMessage() {}
+
+func (x *Cluster) ProtoReflect() protoreflect.Message {
+	mi := &file_api_fleet_v1_fleet_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+func (x *Cluster) GetName() string {
+	if x != nil {
+		if x.xxx_hidden_Name != nil {
+			return *x.xxx_hidden_Name
+		}
+		return ""
+	}
+	return ""
+}
+
+func (x *Cluster) GetAgentVersion() string {
+	if x != nil {
+		if x.xxx_hidden_AgentVersion != nil {
+			return *x.xxx_hidden_AgentVersion
+		}
+		return ""
+	}
+	return ""
+}
+
+func (x *Cluster) SetName(v string) {
+	x.xxx_hidden_Name = &v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 0, 2)
+}
+
+func (x *Cluster) SetAgentVersion(v string) {
+	x.xxx_hidden_AgentVersion = &v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 1, 2)
+}
+
+func (x *Cluster) HasName() bool {
+	if x == nil {
+		return false
+	}
+	return protoimpl.X.Present(&(x.XXX_presence[0]), 0)
+}
+
+func (x *Cluster) HasAgentVersion() bool {
+	if x == nil {
+		return false
+	}
+	return protoimpl.X.Present(&(x.XXX_presence[0]), 1)
+}
+
+func (x *Cluster) ClearName() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 0)
+	x.xxx_hidden_Name = nil
+}
+
+func (x *Cluster) ClearAgentVersion() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 1)
+	x.xxx_hidden_AgentVersion = nil
+}
+
+type Cluster_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// The cluster name.
+	Name *string
+	// The version of the agent binary (e.g. "v1.2.3"), set at build time.
+	AgentVersion *string
+}
+
+func (b0 Cluster_builder) Build() *Cluster {
+	m0 := &Cluster{}
+	b, x := &b0, m0
+	_, _ = b, x
+	if b.Name != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 0, 2)
+		x.xxx_hidden_Name = b.Name
+	}
+	if b.AgentVersion != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 1, 2)
+		x.xxx_hidden_AgentVersion = b.AgentVersion
+	}
+	return m0
+}
+
 // ListClustersRequest is an empty request message for listing clusters.
 type ListClustersRequest struct {
 	state         protoimpl.MessageState `protogen:"opaque.v1"`
@@ -30,7 +143,7 @@ type ListClustersRequest struct {
 
 func (x *ListClustersRequest) Reset() {
 	*x = ListClustersRequest{}
-	mi := &file_api_fleet_v1_fleet_proto_msgTypes[0]
+	mi := &file_api_fleet_v1_fleet_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -42,7 +155,7 @@ func (x *ListClustersRequest) String() string {
 func (*ListClustersRequest) ProtoMessage() {}
 
 func (x *ListClustersRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_fleet_v1_fleet_proto_msgTypes[0]
+	mi := &file_api_fleet_v1_fleet_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -68,14 +181,14 @@ func (b0 ListClustersRequest_builder) Build() *ListClustersRequest {
 // ListClustersResponse contains the list of clusters the agent is registered to.
 type ListClustersResponse struct {
 	state               protoimpl.MessageState `protogen:"opaque.v1"`
-	xxx_hidden_Clusters []string               `protobuf:"bytes,1,rep,name=clusters"`
+	xxx_hidden_Clusters *[]*Cluster            `protobuf:"bytes,1,rep,name=clusters"`
 	unknownFields       protoimpl.UnknownFields
 	sizeCache           protoimpl.SizeCache
 }
 
 func (x *ListClustersResponse) Reset() {
 	*x = ListClustersResponse{}
-	mi := &file_api_fleet_v1_fleet_proto_msgTypes[1]
+	mi := &file_api_fleet_v1_fleet_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -87,7 +200,7 @@ func (x *ListClustersResponse) String() string {
 func (*ListClustersResponse) ProtoMessage() {}
 
 func (x *ListClustersResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_fleet_v1_fleet_proto_msgTypes[1]
+	mi := &file_api_fleet_v1_fleet_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -98,48 +211,51 @@ func (x *ListClustersResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-func (x *ListClustersResponse) GetClusters() []string {
+func (x *ListClustersResponse) GetClusters() []*Cluster {
 	if x != nil {
-		return x.xxx_hidden_Clusters
+		if x.xxx_hidden_Clusters != nil {
+			return *x.xxx_hidden_Clusters
+		}
 	}
 	return nil
 }
 
-func (x *ListClustersResponse) SetClusters(v []string) {
-	x.xxx_hidden_Clusters = v
+func (x *ListClustersResponse) SetClusters(v []*Cluster) {
+	x.xxx_hidden_Clusters = &v
 }
 
 type ListClustersResponse_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
-	// The list of cluster identifiers.
-	Clusters []string
+	// The list of clusters.
+	Clusters []*Cluster
 }
 
 func (b0 ListClustersResponse_builder) Build() *ListClustersResponse {
 	m0 := &ListClustersResponse{}
 	b, x := &b0, m0
 	_, _ = b, x
-	x.xxx_hidden_Clusters = b.Clusters
+	x.xxx_hidden_Clusters = &b.Clusters
 	return m0
 }
 
 // RegisterRequest contains the agent's cluster identity and a CSR for
 // mTLS certificate issuance.
 type RegisterRequest struct {
-	state                  protoimpl.MessageState `protogen:"opaque.v1"`
-	xxx_hidden_Cluster     *string                `protobuf:"bytes,1,opt,name=cluster"`
-	xxx_hidden_AgentId     *string                `protobuf:"bytes,2,opt,name=agent_id,json=agentId"`
-	xxx_hidden_Csr         []byte                 `protobuf:"bytes,3,opt,name=csr"`
-	XXX_raceDetectHookData protoimpl.RaceDetectHookData
-	XXX_presence           [1]uint32
-	unknownFields          protoimpl.UnknownFields
-	sizeCache              protoimpl.SizeCache
+	state                   protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Cluster      *string                `protobuf:"bytes,1,opt,name=cluster"`
+	xxx_hidden_Csr          []byte                 `protobuf:"bytes,2,opt,name=csr"`
+	xxx_hidden_AgentId      *string                `protobuf:"bytes,3,opt,name=agent_id,json=agentId"`
+	xxx_hidden_AgentVersion *string                `protobuf:"bytes,4,opt,name=agent_version,json=agentVersion"`
+	XXX_raceDetectHookData  protoimpl.RaceDetectHookData
+	XXX_presence            [1]uint32
+	unknownFields           protoimpl.UnknownFields
+	sizeCache               protoimpl.SizeCache
 }
 
 func (x *RegisterRequest) Reset() {
 	*x = RegisterRequest{}
-	mi := &file_api_fleet_v1_fleet_proto_msgTypes[2]
+	mi := &file_api_fleet_v1_fleet_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -151,7 +267,7 @@ func (x *RegisterRequest) String() string {
 func (*RegisterRequest) ProtoMessage() {}
 
 func (x *RegisterRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_fleet_v1_fleet_proto_msgTypes[2]
+	mi := &file_api_fleet_v1_fleet_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -172,6 +288,13 @@ func (x *RegisterRequest) GetCluster() string {
 	return ""
 }
 
+func (x *RegisterRequest) GetCsr() []byte {
+	if x != nil {
+		return x.xxx_hidden_Csr
+	}
+	return nil
+}
+
 func (x *RegisterRequest) GetAgentId() string {
 	if x != nil {
 		if x.xxx_hidden_AgentId != nil {
@@ -182,21 +305,19 @@ func (x *RegisterRequest) GetAgentId() string {
 	return ""
 }
 
-func (x *RegisterRequest) GetCsr() []byte {
+func (x *RegisterRequest) GetAgentVersion() string {
 	if x != nil {
-		return x.xxx_hidden_Csr
+		if x.xxx_hidden_AgentVersion != nil {
+			return *x.xxx_hidden_AgentVersion
+		}
+		return ""
 	}
-	return nil
+	return ""
 }
 
 func (x *RegisterRequest) SetCluster(v string) {
 	x.xxx_hidden_Cluster = &v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 0, 3)
-}
-
-func (x *RegisterRequest) SetAgentId(v string) {
-	x.xxx_hidden_AgentId = &v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 1, 3)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 0, 4)
 }
 
 func (x *RegisterRequest) SetCsr(v []byte) {
@@ -204,7 +325,17 @@ func (x *RegisterRequest) SetCsr(v []byte) {
 		v = []byte{}
 	}
 	x.xxx_hidden_Csr = v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 2, 3)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 1, 4)
+}
+
+func (x *RegisterRequest) SetAgentId(v string) {
+	x.xxx_hidden_AgentId = &v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 2, 4)
+}
+
+func (x *RegisterRequest) SetAgentVersion(v string) {
+	x.xxx_hidden_AgentVersion = &v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 3, 4)
 }
 
 func (x *RegisterRequest) HasCluster() bool {
@@ -214,18 +345,25 @@ func (x *RegisterRequest) HasCluster() bool {
 	return protoimpl.X.Present(&(x.XXX_presence[0]), 0)
 }
 
-func (x *RegisterRequest) HasAgentId() bool {
+func (x *RegisterRequest) HasCsr() bool {
 	if x == nil {
 		return false
 	}
 	return protoimpl.X.Present(&(x.XXX_presence[0]), 1)
 }
 
-func (x *RegisterRequest) HasCsr() bool {
+func (x *RegisterRequest) HasAgentId() bool {
 	if x == nil {
 		return false
 	}
 	return protoimpl.X.Present(&(x.XXX_presence[0]), 2)
+}
+
+func (x *RegisterRequest) HasAgentVersion() bool {
+	if x == nil {
+		return false
+	}
+	return protoimpl.X.Present(&(x.XXX_presence[0]), 3)
 }
 
 func (x *RegisterRequest) ClearCluster() {
@@ -233,14 +371,19 @@ func (x *RegisterRequest) ClearCluster() {
 	x.xxx_hidden_Cluster = nil
 }
 
-func (x *RegisterRequest) ClearAgentId() {
+func (x *RegisterRequest) ClearCsr() {
 	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 1)
+	x.xxx_hidden_Csr = nil
+}
+
+func (x *RegisterRequest) ClearAgentId() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 2)
 	x.xxx_hidden_AgentId = nil
 }
 
-func (x *RegisterRequest) ClearCsr() {
-	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 2)
-	x.xxx_hidden_Csr = nil
+func (x *RegisterRequest) ClearAgentVersion() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 3)
+	x.xxx_hidden_AgentVersion = nil
 }
 
 type RegisterRequest_builder struct {
@@ -248,11 +391,13 @@ type RegisterRequest_builder struct {
 
 	// The cluster identifier this agent belongs to.
 	Cluster *string
-	// The agent identifier this agent uses to register with the server.
-	AgentId *string
 	// PEM-encoded PKCS#10 certificate signing request. The server signs
 	// this with its internal CA and returns the issued certificate.
 	Csr []byte
+	// The agent identifier this agent uses to register with the server.
+	AgentId *string
+	// The version of the agent binary (e.g. "v1.2.3"), set at build time.
+	AgentVersion *string
 }
 
 func (b0 RegisterRequest_builder) Build() *RegisterRequest {
@@ -260,16 +405,20 @@ func (b0 RegisterRequest_builder) Build() *RegisterRequest {
 	b, x := &b0, m0
 	_, _ = b, x
 	if b.Cluster != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 0, 3)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 0, 4)
 		x.xxx_hidden_Cluster = b.Cluster
 	}
+	if b.Csr != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 1, 4)
+		x.xxx_hidden_Csr = b.Csr
+	}
 	if b.AgentId != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 1, 3)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 2, 4)
 		x.xxx_hidden_AgentId = b.AgentId
 	}
-	if b.Csr != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 2, 3)
-		x.xxx_hidden_Csr = b.Csr
+	if b.AgentVersion != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 3, 4)
+		x.xxx_hidden_AgentVersion = b.AgentVersion
 	}
 	return m0
 }
@@ -281,6 +430,7 @@ type RegisterResponse struct {
 	xxx_hidden_Endpoint      *string                `protobuf:"bytes,1,opt,name=endpoint"`
 	xxx_hidden_Certificate   []byte                 `protobuf:"bytes,2,opt,name=certificate"`
 	xxx_hidden_CaCertificate []byte                 `protobuf:"bytes,3,opt,name=ca_certificate,json=caCertificate"`
+	xxx_hidden_ServerVersion *string                `protobuf:"bytes,4,opt,name=server_version,json=serverVersion"`
 	XXX_raceDetectHookData   protoimpl.RaceDetectHookData
 	XXX_presence             [1]uint32
 	unknownFields            protoimpl.UnknownFields
@@ -289,7 +439,7 @@ type RegisterResponse struct {
 
 func (x *RegisterResponse) Reset() {
 	*x = RegisterResponse{}
-	mi := &file_api_fleet_v1_fleet_proto_msgTypes[3]
+	mi := &file_api_fleet_v1_fleet_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -301,7 +451,7 @@ func (x *RegisterResponse) String() string {
 func (*RegisterResponse) ProtoMessage() {}
 
 func (x *RegisterResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_fleet_v1_fleet_proto_msgTypes[3]
+	mi := &file_api_fleet_v1_fleet_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -336,9 +486,19 @@ func (x *RegisterResponse) GetCaCertificate() []byte {
 	return nil
 }
 
+func (x *RegisterResponse) GetServerVersion() string {
+	if x != nil {
+		if x.xxx_hidden_ServerVersion != nil {
+			return *x.xxx_hidden_ServerVersion
+		}
+		return ""
+	}
+	return ""
+}
+
 func (x *RegisterResponse) SetEndpoint(v string) {
 	x.xxx_hidden_Endpoint = &v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 0, 3)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 0, 4)
 }
 
 func (x *RegisterResponse) SetCertificate(v []byte) {
@@ -346,7 +506,7 @@ func (x *RegisterResponse) SetCertificate(v []byte) {
 		v = []byte{}
 	}
 	x.xxx_hidden_Certificate = v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 1, 3)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 1, 4)
 }
 
 func (x *RegisterResponse) SetCaCertificate(v []byte) {
@@ -354,7 +514,12 @@ func (x *RegisterResponse) SetCaCertificate(v []byte) {
 		v = []byte{}
 	}
 	x.xxx_hidden_CaCertificate = v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 2, 3)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 2, 4)
+}
+
+func (x *RegisterResponse) SetServerVersion(v string) {
+	x.xxx_hidden_ServerVersion = &v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 3, 4)
 }
 
 func (x *RegisterResponse) HasEndpoint() bool {
@@ -378,6 +543,13 @@ func (x *RegisterResponse) HasCaCertificate() bool {
 	return protoimpl.X.Present(&(x.XXX_presence[0]), 2)
 }
 
+func (x *RegisterResponse) HasServerVersion() bool {
+	if x == nil {
+		return false
+	}
+	return protoimpl.X.Present(&(x.XXX_presence[0]), 3)
+}
+
 func (x *RegisterResponse) ClearEndpoint() {
 	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 0)
 	x.xxx_hidden_Endpoint = nil
@@ -393,6 +565,11 @@ func (x *RegisterResponse) ClearCaCertificate() {
 	x.xxx_hidden_CaCertificate = nil
 }
 
+func (x *RegisterResponse) ClearServerVersion() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 3)
+	x.xxx_hidden_ServerVersion = nil
+}
+
 type RegisterResponse_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
@@ -402,6 +579,10 @@ type RegisterResponse_builder struct {
 	Certificate []byte
 	// PEM-encoded CA certificate for verifying the tunnel server.
 	CaCertificate []byte
+	// The version of the server binary (e.g. "v1.2.3"), set at build time.
+	// Agents compare this against their own version to decide whether a
+	// self-update is needed.
+	ServerVersion *string
 }
 
 func (b0 RegisterResponse_builder) Build() *RegisterResponse {
@@ -409,16 +590,20 @@ func (b0 RegisterResponse_builder) Build() *RegisterResponse {
 	b, x := &b0, m0
 	_, _ = b, x
 	if b.Endpoint != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 0, 3)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 0, 4)
 		x.xxx_hidden_Endpoint = b.Endpoint
 	}
 	if b.Certificate != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 1, 3)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 1, 4)
 		x.xxx_hidden_Certificate = b.Certificate
 	}
 	if b.CaCertificate != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 2, 3)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 2, 4)
 		x.xxx_hidden_CaCertificate = b.CaCertificate
+	}
+	if b.ServerVersion != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 3, 4)
+		x.xxx_hidden_ServerVersion = b.ServerVersion
 	}
 	return m0
 }
@@ -427,41 +612,48 @@ var File_api_fleet_v1_fleet_proto protoreflect.FileDescriptor
 
 const file_api_fleet_v1_fleet_proto_rawDesc = "" +
 	"\n" +
-	"\x18api/fleet/v1/fleet.proto\x12\x13otterscale.fleet.v1\x1a\x15api/annotations.proto\"\x15\n" +
-	"\x13ListClustersRequest\"2\n" +
-	"\x14ListClustersResponse\x12\x1a\n" +
-	"\bclusters\x18\x01 \x03(\tR\bclusters\"X\n" +
+	"\x18api/fleet/v1/fleet.proto\x12\x13otterscale.fleet.v1\x1a\x15api/annotations.proto\"B\n" +
+	"\aCluster\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12#\n" +
+	"\ragent_version\x18\x02 \x01(\tR\fagentVersion\"\x15\n" +
+	"\x13ListClustersRequest\"P\n" +
+	"\x14ListClustersResponse\x128\n" +
+	"\bclusters\x18\x01 \x03(\v2\x1c.otterscale.fleet.v1.ClusterR\bclusters\"}\n" +
 	"\x0fRegisterRequest\x12\x18\n" +
-	"\acluster\x18\x01 \x01(\tR\acluster\x12\x19\n" +
-	"\bagent_id\x18\x02 \x01(\tR\aagentId\x12\x10\n" +
-	"\x03csr\x18\x03 \x01(\fR\x03csr\"w\n" +
+	"\acluster\x18\x01 \x01(\tR\acluster\x12\x10\n" +
+	"\x03csr\x18\x02 \x01(\fR\x03csr\x12\x19\n" +
+	"\bagent_id\x18\x03 \x01(\tR\aagentId\x12#\n" +
+	"\ragent_version\x18\x04 \x01(\tR\fagentVersion\"\x9e\x01\n" +
 	"\x10RegisterResponse\x12\x1a\n" +
 	"\bendpoint\x18\x01 \x01(\tR\bendpoint\x12 \n" +
 	"\vcertificate\x18\x02 \x01(\fR\vcertificate\x12%\n" +
-	"\x0eca_certificate\x18\x03 \x01(\fR\rcaCertificate2\xf8\x01\n" +
+	"\x0eca_certificate\x18\x03 \x01(\fR\rcaCertificate\x12%\n" +
+	"\x0eserver_version\x18\x04 \x01(\tR\rserverVersion2\xf8\x01\n" +
 	"\fFleetService\x12y\n" +
 	"\fListClusters\x12(.otterscale.fleet.v1.ListClustersRequest\x1a).otterscale.fleet.v1.ListClustersResponse\"\x14\x8a\xdf\xd5\x1d\x0f\n" +
 	"\rfleet-enabled\x12m\n" +
 	"\bRegister\x12$.otterscale.fleet.v1.RegisterRequest\x1a%.otterscale.fleet.v1.RegisterResponse\"\x14\x8a\xdf\xd5\x1d\x0f\n" +
 	"\rfleet-enabledB8Z6github.com/otterscale/otterscale-agent/api/fleet/v1;pbb\beditionsp\xe8\a"
 
-var file_api_fleet_v1_fleet_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_api_fleet_v1_fleet_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
 var file_api_fleet_v1_fleet_proto_goTypes = []any{
-	(*ListClustersRequest)(nil),  // 0: otterscale.fleet.v1.ListClustersRequest
-	(*ListClustersResponse)(nil), // 1: otterscale.fleet.v1.ListClustersResponse
-	(*RegisterRequest)(nil),      // 2: otterscale.fleet.v1.RegisterRequest
-	(*RegisterResponse)(nil),     // 3: otterscale.fleet.v1.RegisterResponse
+	(*Cluster)(nil),              // 0: otterscale.fleet.v1.Cluster
+	(*ListClustersRequest)(nil),  // 1: otterscale.fleet.v1.ListClustersRequest
+	(*ListClustersResponse)(nil), // 2: otterscale.fleet.v1.ListClustersResponse
+	(*RegisterRequest)(nil),      // 3: otterscale.fleet.v1.RegisterRequest
+	(*RegisterResponse)(nil),     // 4: otterscale.fleet.v1.RegisterResponse
 }
 var file_api_fleet_v1_fleet_proto_depIdxs = []int32{
-	0, // 0: otterscale.fleet.v1.FleetService.ListClusters:input_type -> otterscale.fleet.v1.ListClustersRequest
-	2, // 1: otterscale.fleet.v1.FleetService.Register:input_type -> otterscale.fleet.v1.RegisterRequest
-	1, // 2: otterscale.fleet.v1.FleetService.ListClusters:output_type -> otterscale.fleet.v1.ListClustersResponse
-	3, // 3: otterscale.fleet.v1.FleetService.Register:output_type -> otterscale.fleet.v1.RegisterResponse
-	2, // [2:4] is the sub-list for method output_type
-	0, // [0:2] is the sub-list for method input_type
-	0, // [0:0] is the sub-list for extension type_name
-	0, // [0:0] is the sub-list for extension extendee
-	0, // [0:0] is the sub-list for field type_name
+	0, // 0: otterscale.fleet.v1.ListClustersResponse.clusters:type_name -> otterscale.fleet.v1.Cluster
+	1, // 1: otterscale.fleet.v1.FleetService.ListClusters:input_type -> otterscale.fleet.v1.ListClustersRequest
+	3, // 2: otterscale.fleet.v1.FleetService.Register:input_type -> otterscale.fleet.v1.RegisterRequest
+	2, // 3: otterscale.fleet.v1.FleetService.ListClusters:output_type -> otterscale.fleet.v1.ListClustersResponse
+	4, // 4: otterscale.fleet.v1.FleetService.Register:output_type -> otterscale.fleet.v1.RegisterResponse
+	3, // [3:5] is the sub-list for method output_type
+	1, // [1:3] is the sub-list for method input_type
+	1, // [1:1] is the sub-list for extension type_name
+	1, // [1:1] is the sub-list for extension extendee
+	0, // [0:1] is the sub-list for field type_name
 }
 
 func init() { file_api_fleet_v1_fleet_proto_init() }
@@ -475,7 +667,7 @@ func file_api_fleet_v1_fleet_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_fleet_v1_fleet_proto_rawDesc), len(file_api_fleet_v1_fleet_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   5,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

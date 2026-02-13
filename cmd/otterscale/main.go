@@ -21,6 +21,7 @@ import (
 	"github.com/otterscale/otterscale-agent/internal/cmd/agent"
 	"github.com/otterscale/otterscale-agent/internal/cmd/server"
 	"github.com/otterscale/otterscale-agent/internal/config"
+	"github.com/otterscale/otterscale-agent/internal/core"
 )
 
 // version is injected at build time via -ldflags
@@ -52,7 +53,9 @@ func run(ctx context.Context) error {
 }
 
 // newCmd is a Wire provider that constructs the root Cobra command and
-// registers the server and agent subcommands.
+// registers the server and agent subcommands. The version is captured
+// by closures passed to the Wire injectors so that the Injector type
+// signatures remain unchanged.
 func newCmd(conf *config.Config) (*cobra.Command, error) {
 	c := &cobra.Command{
 		Use:           "otterscale",
@@ -62,15 +65,17 @@ func newCmd(conf *config.Config) (*cobra.Command, error) {
 		SilenceErrors: true,
 	}
 
+	v := core.Version(version)
+
 	serverCmd, err := cmd.NewServerCommand(conf, func() (*server.Server, func(), error) {
-		return wireServer()
+		return wireServer(v)
 	})
 	if err != nil {
 		return nil, err
 	}
 
 	agentCmd, err := cmd.NewAgentCommand(conf, func() (*agent.Agent, func(), error) {
-		return wireAgent()
+		return wireAgent(v)
 	})
 	if err != nil {
 		return nil, err

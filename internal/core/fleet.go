@@ -3,7 +3,9 @@
 // otterscale) implement the interfaces declared here.
 package core
 
-import "context"
+import (
+	"context"
+)
 
 // TunnelProvider is the server-side abstraction for managing reverse
 // tunnels. It allocates unique endpoints per cluster, signs agent
@@ -14,11 +16,11 @@ type TunnelProvider interface {
 	// configure mTLS.
 	CACertPEM() []byte
 	// ListClusters returns the names of all registered clusters.
-	ListClusters() []string
+	ListClusters() map[string]Cluster
 	// RegisterCluster validates and signs the agent's CSR, creates
 	// a tunnel user, and returns the allocated endpoint together
 	// with the PEM-encoded signed certificate.
-	RegisterCluster(cluster, agentID string, csrPEM []byte) (endpoint string, certPEM []byte, err error)
+	RegisterCluster(cluster, agentID, agentVersion string, csrPEM []byte) (endpoint string, certPEM []byte, err error)
 	// ResolveAddress returns the HTTP base URL for the given cluster.
 	ResolveAddress(cluster string) (string, error)
 }
@@ -49,32 +51,47 @@ type Registration struct {
 	// set by the TunnelConsumer so that callers can derive auth
 	// credentials without re-querying the hostname.
 	AgentID string
+	// ServerVersion is the version of the server binary. Agents
+	// compare this against their own version to decide whether a
+	// self-update is needed.
+	ServerVersion string
+}
+
+// Cluster holds the per-cluster tunnel state: the allocated
+// loopback host and the chisel user name.
+type Cluster struct {
+	Host         string // unique 127.x.x.x loopback address
+	User         string // chisel user name
+	AgentVersion string // agent binary version
 }
 
 // FleetUseCase orchestrates cluster registration on the server side.
 // It delegates CSR signing and tunnel setup to the TunnelProvider.
 type FleetUseCase struct {
-	tunnel TunnelProvider
+	tunnel  TunnelProvider
+	version Version
 }
 
 // NewFleetUseCase returns a FleetUseCase backed by the given
-// TunnelProvider.
-func NewFleetUseCase(tunnel TunnelProvider) *FleetUseCase {
+// TunnelProvider. version is the server binary version, included in
+// registration responses so agents can detect mismatches.
+func NewFleetUseCase(tunnel TunnelProvider, version Version) *FleetUseCase {
 	return &FleetUseCase{
-		tunnel: tunnel,
+		tunnel:  tunnel,
+		version: version,
 	}
 }
 
 // ListClusters returns the names of all currently registered clusters.
-func (uc *FleetUseCase) ListClusters() []string {
+func (uc *FleetUseCase) ListClusters() map[string]Cluster {
 	return uc.tunnel.ListClusters()
 }
 
 // RegisterCluster forwards the agent's CSR to the tunnel provider for
-// signing, and returns the signed certificate, CA certificate, and
-// tunnel endpoint.
-func (uc *FleetUseCase) RegisterCluster(cluster, agentID string, csrPEM []byte) (Registration, error) {
-	endpoint, certPEM, err := uc.tunnel.RegisterCluster(cluster, agentID, csrPEM)
+// signing, and returns the signed certificate, CA certificate, tunnel
+// endpoint, and the server's version.
+func (uc *FleetUseCase) RegisterCluster(cluster, agentID, agentVersion string, csrPEM []byte) (Registration, error) {
+	endpoint, certPEM, err := uc.tunnel.RegisterCluster(cluster, agentID, agentVersion, csrPEM)
 	if err != nil {
 		return Registration{}, err
 	}
@@ -82,5 +99,6 @@ func (uc *FleetUseCase) RegisterCluster(cluster, agentID string, csrPEM []byte) 
 		Endpoint:      endpoint,
 		Certificate:   certPEM,
 		CACertificate: uc.tunnel.CACertPEM(),
+		ServerVersion: string(uc.version),
 	}, nil
 }

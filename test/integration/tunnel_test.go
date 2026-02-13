@@ -2,6 +2,8 @@ package integration
 
 import (
 	"context"
+	"maps"
+	"slices"
 	"strings"
 	"testing"
 
@@ -14,16 +16,16 @@ import (
 func TestFleetRegisterClusterUsesSingleSharedTunnelPort(t *testing.T) {
 	tunnel := chisel.NewService()
 	initTunnelServer(t, tunnel)
-	fleet := core.NewFleetUseCase(tunnel)
+	fleet := core.NewFleetUseCase(tunnel, "test")
 
 	csrA := generateCSR(t, "agent-a")
 	csrB := generateCSR(t, "agent-b")
 
-	regA, err := fleet.RegisterCluster("cluster-a", "agent-a", csrA)
+	regA, err := fleet.RegisterCluster("cluster-a", "agent-a", "test", csrA)
 	if err != nil {
 		t.Fatalf("register cluster-a: %v", err)
 	}
-	regB, err := fleet.RegisterCluster("cluster-b", "agent-b", csrB)
+	regB, err := fleet.RegisterCluster("cluster-b", "agent-b", "test", csrB)
 	if err != nil {
 		t.Fatalf("register cluster-b: %v", err)
 	}
@@ -59,16 +61,16 @@ func TestFleetRegisterClusterUsesSingleSharedTunnelPort(t *testing.T) {
 func TestFleetRegisterClusterLatestAgentWinsForSameCluster(t *testing.T) {
 	tunnel := chisel.NewService()
 	initTunnelServer(t, tunnel)
-	fleet := core.NewFleetUseCase(tunnel)
+	fleet := core.NewFleetUseCase(tunnel, "test")
 
 	csr1 := generateCSR(t, "agent-r-1")
 	csr2 := generateCSR(t, "agent-r-2")
 
-	_, err := fleet.RegisterCluster("cluster-r", "agent-r-1", csr1)
+	_, err := fleet.RegisterCluster("cluster-r", "agent-r-1", "test", csr1)
 	if err != nil {
 		t.Fatalf("register agent-r-1: %v", err)
 	}
-	reg2, err := fleet.RegisterCluster("cluster-r", "agent-r-2", csr2)
+	reg2, err := fleet.RegisterCluster("cluster-r", "agent-r-2", "test", csr2)
 	if err != nil {
 		t.Fatalf("register agent-r-2: %v", err)
 	}
@@ -85,7 +87,7 @@ func TestFleetRegisterClusterLatestAgentWinsForSameCluster(t *testing.T) {
 
 	// Only one cluster should be registered.
 	clusters := tunnel.ListClusters()
-	if len(clusters) != 1 || clusters[0] != "cluster-r" {
+	if len(clusters) != 1 || slices.Collect(maps.Keys(clusters))[0] != "cluster-r" {
 		t.Fatalf("expected exactly one cluster 'cluster-r', got %v", clusters)
 	}
 }
@@ -93,17 +95,17 @@ func TestFleetRegisterClusterLatestAgentWinsForSameCluster(t *testing.T) {
 func TestFleetRegisterClusterReregisterAndReplaceAcrossAgents(t *testing.T) {
 	tunnel := chisel.NewService()
 	initTunnelServer(t, tunnel)
-	fleet := core.NewFleetUseCase(tunnel)
+	fleet := core.NewFleetUseCase(tunnel, "test")
 
 	csrA := generateCSR(t, "agent-a")
 	csrB := generateCSR(t, "agent-b")
 
-	regA1, err := fleet.RegisterCluster("cluster-z", "agent-a", csrA)
+	regA1, err := fleet.RegisterCluster("cluster-z", "agent-a", "test", csrA)
 	if err != nil {
 		t.Fatalf("register agent-a #1: %v", err)
 	}
 
-	regB, err := fleet.RegisterCluster("cluster-z", "agent-b", csrB)
+	regB, err := fleet.RegisterCluster("cluster-z", "agent-b", "test", csrB)
 	if err != nil {
 		t.Fatalf("register agent-b: %v", err)
 	}
@@ -118,7 +120,7 @@ func TestFleetRegisterClusterReregisterAndReplaceAcrossAgents(t *testing.T) {
 		t.Fatalf("expected resolve to point to agent-b endpoint %q, got %q", regB.Endpoint, addrB)
 	}
 
-	regA2, err := fleet.RegisterCluster("cluster-z", "agent-a", csrA)
+	regA2, err := fleet.RegisterCluster("cluster-z", "agent-a", "test", csrA)
 	if err != nil {
 		t.Fatalf("register agent-a #2: %v", err)
 	}

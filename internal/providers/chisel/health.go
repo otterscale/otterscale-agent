@@ -29,7 +29,7 @@ func (s *Service) clusterSnapshot() map[string]string {
 
 	snapshot := make(map[string]string, len(s.clusters))
 	for name, entry := range s.clusters {
-		snapshot[name] = entry.host
+		snapshot[name] = entry.Host
 	}
 	return snapshot
 }

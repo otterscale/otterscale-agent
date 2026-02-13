@@ -28,13 +28,21 @@ service FleetService {
   };
 }
 
+message Cluster {
+  // The cluster name.
+  string name = 1;
+
+  // The version of the agent binary (e.g. "v1.2.3"), set at build time.
+  string agent_version = 2;
+}
+
 // ListClustersRequest is an empty request message for listing clusters.
 message ListClustersRequest {}
 
 // ListClustersResponse contains the list of clusters the agent is registered to.
 message ListClustersResponse {
-  // The list of cluster identifiers.
-  repeated string clusters = 1;
+  // The list of clusters.
+  repeated Cluster clusters = 1;
 }
 
 // RegisterRequest contains the agent's cluster identity and a CSR for
@@ -43,12 +51,15 @@ message RegisterRequest {
   // The cluster identifier this agent belongs to.
   string cluster = 1;
 
-  // The agent identifier this agent uses to register with the server.
-  string agent_id = 2;
-
   // PEM-encoded PKCS#10 certificate signing request. The server signs
   // this with its internal CA and returns the issued certificate.
-  bytes csr = 3;
+  bytes csr = 2;
+
+    // The agent identifier this agent uses to register with the server.
+  string agent_id = 3;
+
+    // The version of the agent binary (e.g. "v1.2.3"), set at build time.
+  string agent_version = 4;
 }
 
 // RegisterResponse contains a CA-signed certificate and the CA
@@ -62,4 +73,9 @@ message RegisterResponse {
 
   // PEM-encoded CA certificate for verifying the tunnel server.
   bytes ca_certificate = 3;
+
+  // The version of the server binary (e.g. "v1.2.3"), set at build time.
+  // Agents compare this against their own version to decide whether a
+  // self-update is needed.
+  string server_version = 4;
 }

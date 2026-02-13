@@ -5,6 +5,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/otterscale/otterscale-agent/internal/core"
@@ -27,12 +28,14 @@ type Config struct {
 type Agent struct {
 	handler *Handler
 	tunnel  core.TunnelConsumer
+	version core.Version
 }
 
 // NewAgent returns an Agent wired to the given handler and tunnel
-// consumer.
-func NewAgent(handler *Handler, tunnel core.TunnelConsumer) *Agent {
-	return &Agent{handler: handler, tunnel: tunnel}
+// consumer. version is injected via DI and used for version-mismatch
+// detection during registration.
+func NewAgent(handler *Handler, tunnel core.TunnelConsumer, version core.Version) *Agent {
+	return &Agent{handler: handler, tunnel: tunnel, version: version}
 }
 
 // Run starts the agent. It creates an in-memory pipe listener for the
@@ -72,12 +75,20 @@ func (a *Agent) Run(ctx context.Context, cfg Config) error {
 
 // register wraps the TunnelConsumer so that it returns a
 // RegisterResult containing mTLS credentials and derived auth.
+// After a successful registration it checks whether the server
+// version diverges from the agent version and, if so, triggers a
+// self-update by patching its own Deployment image.
 func (a *Agent) register() tunnel.RegisterFunc {
+	up := newUpdater()
+
 	return func(ctx context.Context, serverURL, cluster string) (*tunnel.RegisterResult, error) {
 		reg, err := a.tunnel.Register(ctx, serverURL, cluster)
 		if err != nil {
 			return nil, err
 		}
+
+		// Check version and trigger self-update if needed.
+		a.checkVersion(ctx, reg, up)
 
 		// Derive the chisel auth string from the signed
 		// certificate. This must match the password the server
@@ -94,5 +105,40 @@ func (a *Agent) register() tunnel.RegisterFunc {
 			CertPEM:   reg.Certificate,
 			KeyPEM:    a.tunnel.PrivateKeyPEM(),
 		}, nil
+	}
+}
+
+// checkVersion compares the agent and server versions. When they
+// differ and a self-updater is configured, the agent patches its own
+// Deployment image to trigger a rolling update. Errors are logged but
+// do not prevent the tunnel from connecting — the agent continues to
+// serve with the current version.
+func (a *Agent) checkVersion(ctx context.Context, reg core.Registration, up *updater) {
+	log := slog.Default().With("component", "version-check")
+
+	if reg.ServerVersion == "" {
+		log.Debug("server did not report a version, skipping check")
+		return
+	}
+
+	agentVersion := string(a.version)
+
+	if reg.ServerVersion == agentVersion {
+		log.Info("version match", "version", agentVersion)
+		return
+	}
+
+	log.Warn("version mismatch detected",
+		"agent_version", agentVersion,
+		"server_version", reg.ServerVersion,
+	)
+
+	if up == nil {
+		log.Warn("self-update disabled (no deployment name configured)")
+		return
+	}
+
+	if err := up.patch(ctx, reg.ServerVersion); err != nil {
+		log.Error("self-update failed", "error", err)
 	}
 }

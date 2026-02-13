@@ -1,12 +1,10 @@
 package agent
 
 import (
-	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"net/url"
-	"os"
 
 	utilproxy "k8s.io/apimachinery/pkg/util/proxy"
 	"k8s.io/client-go/rest"
@@ -69,10 +67,5 @@ func (h *Handler) newKubeConfig() (*rest.Config, error) {
 
 	slog.Warn("failed to load in-cluster config, falling back to KUBECONFIG environment variable")
 
-	kubeconfigEnv := os.Getenv("KUBECONFIG")
-	if kubeconfigEnv == "" {
-		return nil, errors.New("KUBECONFIG environment variable is not set")
-	}
-
-	return clientcmd.BuildConfigFromFlags("", kubeconfigEnv)
+	return clientcmd.BuildConfigFromFlags("", clientcmd.RecommendedHomeFile)
 }

@@ -34,15 +34,16 @@ func (s *FleetService) ListClusters(ctx context.Context, req *pb.ListClustersReq
 	clusters := s.fleet.ListClusters()
 
 	resp := &pb.ListClustersResponse{}
-	resp.SetClusters(clusters)
+	resp.SetClusters(s.toProtoClusters(clusters))
 	return resp, nil
 }
 
 // Register validates and signs the agent's CSR, allocates a tunnel
 // endpoint, and returns the signed certificate together with the CA
-// certificate for mTLS.
+// certificate for mTLS. The response includes the server version so
+// agents can detect mismatches and self-update.
 func (s *FleetService) Register(ctx context.Context, req *pb.RegisterRequest) (*pb.RegisterResponse, error) {
-	reg, err := s.fleet.RegisterCluster(req.GetCluster(), req.GetAgentId(), req.GetCsr())
+	reg, err := s.fleet.RegisterCluster(req.GetCluster(), req.GetAgentId(), req.GetAgentVersion(), req.GetCsr())
 	if err != nil {
 		return nil, err
 	}
@@ -51,5 +52,25 @@ func (s *FleetService) Register(ctx context.Context, req *pb.RegisterRequest) (*
 	resp.SetEndpoint(reg.Endpoint)
 	resp.SetCertificate(reg.Certificate)
 	resp.SetCaCertificate(reg.CACertificate)
+	resp.SetServerVersion(reg.ServerVersion)
 	return resp, nil
+}
+
+// toProtoResources converts a slice of Unstructured objects into
+// protobuf Resource messages.
+func (s *FleetService) toProtoClusters(m map[string]core.Cluster) []*pb.Cluster {
+	ret := []*pb.Cluster{}
+	for name, cluster := range m {
+		ret = append(ret, s.toProtoCluster(name, cluster))
+	}
+	return ret
+}
+
+// toProtoResource wraps a raw Kubernetes object map in a protobuf
+// Resource message.
+func (s *FleetService) toProtoCluster(name string, cluster core.Cluster) *pb.Cluster {
+	ret := &pb.Cluster{}
+	ret.SetName(name)
+	ret.SetAgentVersion(cluster.AgentVersion)
+	return ret
 }

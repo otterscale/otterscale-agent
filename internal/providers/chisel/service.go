@@ -11,7 +11,6 @@ import (
 	"log/slog"
 	"maps"
 	"regexp"
-	"slices"
 	"sync"
 	"sync/atomic"
 
@@ -30,13 +29,6 @@ const tunnelPort = 16598
 // avoided).
 const maxHosts = 254 * 254 * 254
 
-// clusterEntry holds the per-cluster tunnel state: the allocated
-// loopback host and the chisel user name.
-type clusterEntry struct {
-	host string // unique 127.x.x.x loopback address
-	user string // chisel user name
-}
-
 // Service manages the mapping between cluster names and unique
 // loopback addresses, and provisions chisel users for each agent.
 // It implements core.TunnelProvider and additionally exposes the
@@ -47,8 +39,8 @@ type Service struct {
 	log    *slog.Logger
 
 	mu        sync.RWMutex
-	clusters  map[string]*clusterEntry // cluster name -> tunnel state
-	usedHosts map[string]struct{}      // set of allocated hosts
+	clusters  map[string]core.Cluster // cluster name -> tunnel state
+	usedHosts map[string]struct{}     // set of allocated hosts
 }
 
 // NewService returns a new Service backed by chisel.
@@ -57,7 +49,7 @@ type Service struct {
 func NewService() *Service {
 	return &Service{
 		log:       slog.Default().With("component", "tunnel-provider"),
-		clusters:  make(map[string]*clusterEntry),
+		clusters:  make(map[string]core.Cluster),
 		usedHosts: make(map[string]struct{}),
 	}
 }
@@ -91,11 +83,11 @@ func (s *Service) CACertPEM() []byte {
 }
 
 // ListClusters returns the names of all currently registered clusters.
-func (s *Service) ListClusters() []string {
+func (s *Service) ListClusters() map[string]core.Cluster {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	return slices.Collect(maps.Keys(s.clusters))
+	return maps.Clone(s.clusters)
 }
 
 // RegisterCluster validates and signs the agent's CSR, associates a
@@ -106,7 +98,7 @@ func (s *Service) ListClusters() []string {
 // If the cluster was previously registered, the old host allocation
 // is released first so that re-registration always moves the cluster
 // to a fresh address.
-func (s *Service) RegisterCluster(cluster, agentID string, csrPEM []byte) (string, []byte, error) {
+func (s *Service) RegisterCluster(cluster, agentID, agentVersion string, csrPEM []byte) (string, []byte, error) {
 	ca := s.ca.Load()
 	if ca == nil {
 		return "", nil, fmt.Errorf("CA not initialized")
@@ -134,8 +126,8 @@ func (s *Service) RegisterCluster(cluster, agentID string, csrPEM []byte) (strin
 	// Release the previous host and user for this cluster, if any,
 	// so that stale credentials do not accumulate in chisel.
 	if prev, ok := s.clusters[cluster]; ok {
-		srv.DeleteUser(prev.user)
-		s.releaseHost(prev.host)
+		srv.DeleteUser(prev.User)
+		s.releaseHost(prev.Host)
 		delete(s.clusters, cluster)
 	}
 
@@ -153,9 +145,10 @@ func (s *Service) RegisterCluster(cluster, agentID string, csrPEM []byte) (strin
 		return "", nil, err
 	}
 
-	s.clusters[cluster] = &clusterEntry{
-		host: host,
-		user: agentID,
+	s.clusters[cluster] = core.Cluster{
+		Host:         host,
+		User:         agentID,
+		AgentVersion: agentVersion,
 	}
 
 	return fmt.Sprintf("%s:%d", host, tunnelPort), certPEM, nil
@@ -174,8 +167,8 @@ func (s *Service) DeregisterCluster(cluster string) {
 	if !ok {
 		return
 	}
-	srv.DeleteUser(entry.user)
-	s.releaseHost(entry.host)
+	srv.DeleteUser(entry.User)
+	s.releaseHost(entry.Host)
 	delete(s.clusters, cluster)
 }
 
@@ -190,7 +183,7 @@ func (s *Service) ResolveAddress(cluster string) (string, error) {
 		return "", fmt.Errorf("cluster %s not registered", cluster)
 	}
 
-	return fmt.Sprintf("http://%s:%d", entry.host, tunnelPort), nil
+	return fmt.Sprintf("http://%s:%d", entry.Host, tunnelPort), nil
 }
 
 // allocateHost picks a unique loopback address for the given cluster

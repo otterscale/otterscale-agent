@@ -35,10 +35,11 @@ func wireCmd() (*cobra.Command, func(), error) {
 }
 
 // wireServer assembles a fully wired Server with all gRPC services,
-// use-cases, and infrastructure providers.
-func wireServer() (*server.Server, func(), error) {
+// use-cases, and infrastructure providers. The version parameter is
+// provided by the caller and flows through Wire to FleetUseCase.
+func wireServer(v core.Version) (*server.Server, func(), error) {
 	service := chisel.NewService()
-	fleetUseCase := core.NewFleetUseCase(service)
+	fleetUseCase := core.NewFleetUseCase(service, v)
 	fleetService := app.NewFleetService(fleetUseCase)
 	kubernetesKubernetes := kubernetes.New(service)
 	discoveryClient := kubernetes.NewDiscoveryClient(kubernetesKubernetes)
@@ -55,14 +56,15 @@ func wireServer() (*server.Server, func(), error) {
 }
 
 // wireAgent assembles a fully wired Agent with its handler and fleet
-// registrar.
-func wireAgent() (*agent.Agent, func(), error) {
+// registrar. The version parameter is provided by the caller and flows
+// through Wire to both FleetRegistrar and Agent.
+func wireAgent(v core.Version) (*agent.Agent, func(), error) {
 	handler := agent.NewHandler()
-	tunnelConsumer, err := otterscale.NewFleetRegistrar()
+	tunnelConsumer, err := otterscale.NewFleetRegistrar(v)
 	if err != nil {
 		return nil, nil, err
 	}
-	agentAgent := agent.NewAgent(handler, tunnelConsumer)
+	agentAgent := agent.NewAgent(handler, tunnelConsumer, v)
 	return agentAgent, func() {
 	}, nil
 }
