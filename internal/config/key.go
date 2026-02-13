@@ -1,5 +1,14 @@
+// Package config provides unified configuration loading from files,
+// environment variables, and CLI flags using viper and pflag.
+//
+// Resolution order (highest wins):
+//  1. CLI flags
+//  2. Environment variables (prefix OTTERSCALE_)
+//  3. Config file (config.yaml in . or /etc/otterscale/)
+//  4. Compiled defaults
 package config
 
+// Viper keys for server-mode configuration.
 const (
 	keyServerAddress          = "server.address"
 	keyServerAllowedOrigins   = "server.allowed_origins"
@@ -9,6 +18,7 @@ const (
 	keyServerKeycloakClientID = "server.keycloak.client_id"
 )
 
+// Viper keys for agent-mode configuration.
 const (
 	keyAgentCluster         = "agent.cluster"
 	keyAgentServerURL       = "agent.server_url"

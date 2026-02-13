@@ -11,23 +11,28 @@ import (
 	"github.com/spf13/viper"
 )
 
+// Config wraps a viper instance and provides typed accessors for every
+// configuration key. Create one via New().
 type Config struct {
 	v *viper.Viper
 }
 
+// New initialises a Config by loading values from the config file,
+// environment variables, and compiled defaults (in that priority
+// order; CLI flags, bound later via BindFlags, take highest priority).
 func New() (*Config, error) {
 	v := viper.New()
 
-	// default values
+	// Register compiled defaults for all known options.
 	for _, o := range ServerOptions {
 		v.SetDefault(o.Key, o.Default)
 	}
-
 	for _, o := range AgentOptions {
 		v.SetDefault(o.Key, o.Default)
 	}
 
-	// load config from file
+	// Attempt to load a config file from the current directory or
+	// the system-wide location.
 	v.SetConfigName("config")
 	v.SetConfigType("yaml")
 	v.AddConfigPath(".")
@@ -40,7 +45,8 @@ func New() (*Config, error) {
 		}
 	}
 
-	// load config from environment variables
+	// Environment variables are prefixed with OTTERSCALE_ and use
+	// underscores in place of dots (e.g. OTTERSCALE_SERVER_ADDRESS).
 	v.SetEnvPrefix("OTTERSCALE")
 	v.AutomaticEnv()
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
@@ -48,6 +54,9 @@ func New() (*Config, error) {
 	return &Config{v: v}, nil
 }
 
+// BindFlags registers CLI flags for the given option slice and binds
+// them to the underlying viper keys so that flag values override file
+// and environment sources.
 func (c *Config) BindFlags(fs *pflag.FlagSet, options []Option) error {
 	for _, o := range options {
 		switch v := o.Default.(type) {
@@ -73,42 +82,67 @@ func (c *Config) BindFlags(fs *pflag.FlagSet, options []Option) error {
 	return nil
 }
 
+// ---------------------------------------------------------------------------
+// Server-mode accessors
+// ---------------------------------------------------------------------------
+
+// ServerAddress returns the HTTP listen address for the server.
 func (c *Config) ServerAddress() string {
-	return c.v.GetString(keyServerAddress) // OTTERSCALE_SERVER_ADDRESS
+	return c.v.GetString(keyServerAddress)
 }
 
+// ServerAllowedOrigins returns the list of allowed CORS origins.
 func (c *Config) ServerAllowedOrigins() []string {
-	return c.v.GetStringSlice(keyServerAllowedOrigins) // OTTERSCALE_SERVER_ALLOWED_ORIGINS
+	return c.v.GetStringSlice(keyServerAllowedOrigins)
 }
 
+// ServerTunnelAddress returns the listen address for the chisel tunnel
+// server.
 func (c *Config) ServerTunnelAddress() string {
-	return c.v.GetString(keyServerTunnelAddress) // OTTERSCALE_SERVER_TUNNEL_ADDRESS
+	return c.v.GetString(keyServerTunnelAddress)
 }
 
+// ServerTunnelKeySeed returns the deterministic key seed used to
+// generate the tunnel server's TLS key pair.
 func (c *Config) ServerTunnelKeySeed() string {
-	return c.v.GetString(keyServerTunnelKeySeed) // OTTERSCALE_SERVER_TUNNEL_KEY_SEED
+	return c.v.GetString(keyServerTunnelKeySeed)
 }
 
+// ServerKeycloakRealmURL returns the Keycloak realm issuer URL used
+// for OIDC token verification.
 func (c *Config) ServerKeycloakRealmURL() string {
-	return c.v.GetString(keyServerKeycloakRealmURL) // OTTERSCALE_SERVER_KEYCLOAK_REALM_URL
+	return c.v.GetString(keyServerKeycloakRealmURL)
 }
 
+// ServerKeycloakClientID returns the Keycloak client ID expected in
+// the "aud" claim of incoming tokens.
 func (c *Config) ServerKeycloakClientID() string {
-	return c.v.GetString(keyServerKeycloakClientID) // OTTERSCALE_SERVER_KEYCLOAK_CLIENT_ID
+	return c.v.GetString(keyServerKeycloakClientID)
 }
 
+// ---------------------------------------------------------------------------
+// Agent-mode accessors
+// ---------------------------------------------------------------------------
+
+// AgentCluster returns the cluster name this agent registers under.
 func (c *Config) AgentCluster() string {
-	return c.v.GetString(keyAgentCluster) // OTTERSCALE_AGENT_CLUSTER
+	return c.v.GetString(keyAgentCluster)
 }
 
+// AgentServerURL returns the fleet server URL the agent registers
+// against.
 func (c *Config) AgentServerURL() string {
-	return c.v.GetString(keyAgentServerURL) // OTTERSCALE_AGENT_SERVER_URL
+	return c.v.GetString(keyAgentServerURL)
 }
 
+// AgentTunnelServerURL returns the chisel tunnel server URL the agent
+// connects to.
 func (c *Config) AgentTunnelServerURL() string {
-	return c.v.GetString(keyAgentTunnelServerURL) // OTTERSCALE_AGENT_TUNNEL_SERVER_URL
+	return c.v.GetString(keyAgentTunnelServerURL)
 }
 
+// AgentTunnelTimeout returns the keep-alive interval for the tunnel
+// connection.
 func (c *Config) AgentTunnelTimeout() time.Duration {
-	return c.v.GetDuration(keyAgentTunnelTimeout) // OTTERSCALE_AGENT_TUNNEL_TIMEOUT
+	return c.v.GetDuration(keyAgentTunnelTimeout)
 }

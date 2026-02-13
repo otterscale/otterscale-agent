@@ -1,3 +1,5 @@
+// Package middleware provides HTTP middleware for the otterscale
+// server, including OIDC-based authentication.
 package middleware
 
 import (
@@ -11,7 +13,13 @@ import (
 	"github.com/otterscale/otterscale-agent/internal/core"
 )
 
-// NewOIDC creates a new OIDC authentication middleware.
+// NewOIDC creates a ConnectRPC authentication middleware that verifies
+// incoming Bearer tokens against the given OIDC issuer and client ID.
+//
+// On success, the authenticated user's subject and a fixed
+// "system:authenticated" group are stored in the request context as
+// core.UserInfo. Keycloak-native groups are intentionally not
+// forwarded to keep Keycloak and Kubernetes group namespaces separate.
 func NewOIDC(issuer, clientID string) (*authn.Middleware, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -38,7 +46,7 @@ func NewOIDC(issuer, clientID string) (*authn.Middleware, error) {
 
 		return core.UserInfo{
 			Subject: idToken.Subject,
-			Groups:  []string{"system:authenticated"}, // hardcoded, for separation of keycloak and kubernetes groups
+			Groups:  []string{"system:authenticated"},
 		}, nil
 	}
 

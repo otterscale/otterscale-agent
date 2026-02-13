@@ -218,6 +218,10 @@ func (c *Client) runSession(ctx context.Context, inner *chclient.Client) error {
 	return err
 }
 
+// ---------------------------------------------------------------------------
+// Helper functions
+// ---------------------------------------------------------------------------
+
 // isAuthErr detects authentication-related errors from chisel by
 // inspecting the error message. This is necessary because chisel does
 // not expose typed errors for auth failures.
