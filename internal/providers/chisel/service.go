@@ -18,14 +18,14 @@ type service struct {
 
 	mu           sync.Mutex
 	clusterHosts map[string]string
-	usedHosts    map[string]bool
+	usedHosts    map[string]struct{}
 }
 
 func NewService() core.TunnelProvider {
 	return &service{
 		server:       &chserver.Server{}, // Lazy initialization
 		clusterHosts: map[string]string{},
-		usedHosts:    map[string]bool{},
+		usedHosts:    map[string]struct{}{},
 	}
 }
 
@@ -78,7 +78,7 @@ func (c *service) allocateHost(cluster string) (string, error) {
 		if _, exists := c.usedHosts[candidate]; exists {
 			continue
 		}
-		c.usedHosts[candidate] = true
+		c.usedHosts[candidate] = struct{}{}
 		return candidate, nil
 	}
 	return "", fmt.Errorf("failed to allocate loopback host for cluster %s", cluster)

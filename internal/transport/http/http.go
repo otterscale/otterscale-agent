@@ -25,6 +25,7 @@ type Server struct {
 	address        string
 	mount          MountFunc
 	authMiddleware *authn.Middleware
+	publicPaths    map[string]struct{}
 	allowedOrigins []string
 }
 
@@ -46,6 +47,24 @@ func WithMount(mount MountFunc) ServerOption {
 func WithAuthMiddleware(m *authn.Middleware) ServerOption {
 	return func(o *Server) {
 		o.authMiddleware = m
+	}
+}
+
+// WithPublicPaths configures unauthenticated paths.
+func WithPublicPaths(paths []string) ServerOption {
+	return func(o *Server) {
+		if len(paths) == 0 {
+			return
+		}
+		if o.publicPaths == nil {
+			o.publicPaths = make(map[string]struct{}, len(paths))
+		}
+		for _, path := range paths {
+			if path == "" {
+				continue
+			}
+			o.publicPaths[path] = struct{}{}
+		}
 	}
 }
 
@@ -78,7 +97,18 @@ func NewServer(opts ...ServerOption) (*Server, error) {
 
 	// Apply Authentication Middleware
 	if srv.authMiddleware != nil {
-		handler = srv.authMiddleware.Wrap(handler)
+		protected := srv.authMiddleware.Wrap(handler)
+		if len(srv.publicPaths) == 0 {
+			handler = protected
+		} else {
+			handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if _, ok := srv.publicPaths[r.URL.Path]; ok {
+					mux.ServeHTTP(w, r)
+					return
+				}
+				protected.ServeHTTP(w, r)
+			})
+		}
 	}
 
 	// Apply CORS Middleware
@@ -131,6 +161,7 @@ func (s *Server) Start(ctx context.Context) error {
 	slog.Info("Server starting on",
 		"address", listener.Addr().String(),
 		"authMiddleware", s.authMiddleware != nil,
+		"publicPaths", len(s.publicPaths),
 		"allowedOrigins", s.allowedOrigins,
 	)
 
