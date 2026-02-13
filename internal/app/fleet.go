@@ -40,8 +40,7 @@ func (s *FleetService) ListClusters(ctx context.Context, req *pb.ListClustersReq
 
 // Register registers an agent for the given cluster. It generates a
 // one-time token, allocates a tunnel endpoint, and returns the
-// endpoint, the server's TLS fingerprint, the token, and a proxy
-// token for HTTP-level authentication.
+// endpoint, the server's TLS fingerprint, and the token.
 func (s *FleetService) Register(ctx context.Context, req *pb.RegisterRequest) (*pb.RegisterResponse, error) {
 	reg, err := s.fleet.RegisterCluster(req.GetCluster(), req.GetAgentId())
 	if err != nil {
@@ -52,6 +51,5 @@ func (s *FleetService) Register(ctx context.Context, req *pb.RegisterRequest) (*
 	resp.SetEndpoint(reg.Endpoint)
 	resp.SetFingerprint(reg.Fingerprint)
 	resp.SetToken(reg.Token)
-	resp.SetProxyToken(reg.ProxyToken)
 	return resp, nil
 }

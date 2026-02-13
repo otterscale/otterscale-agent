@@ -26,6 +26,7 @@ type ServerOption func(*Server)
 type Server struct {
 	inner          *http.Server
 	address        string
+	listener       net.Listener
 	mount          MountFunc
 	authMiddleware *authn.Middleware
 	publicPaths    map[string]struct{}
@@ -36,6 +37,13 @@ type Server struct {
 // WithAddress configures the listen address (e.g. ":8299").
 func WithAddress(address string) ServerOption {
 	return func(s *Server) { s.address = address }
+}
+
+// WithListener provides an external net.Listener for the server to
+// use. When set, Start will serve on this listener instead of
+// creating a new TCP listener from the configured address.
+func WithListener(ln net.Listener) ServerOption {
+	return func(s *Server) { s.listener = ln }
 }
 
 // WithMount configures the function that registers route handlers.
@@ -92,6 +100,13 @@ func NewServer(opts ...ServerOption) (*Server, error) {
 	if s.log == nil {
 		s.log = slog.Default().With("component", "http-server")
 	}
+	if s.listener == nil {
+		ln, err := net.Listen("tcp", s.address)
+		if err != nil {
+			return nil, fmt.Errorf("http listen %q: %w", s.address, err)
+		}
+		s.listener = ln
+	}
 
 	handler, err := s.buildHandler()
 	if err != nil {
@@ -124,23 +139,19 @@ func (s *Server) Handler() http.Handler {
 // Start begins accepting connections and blocks until the server is
 // shut down or an unrecoverable error occurs.
 func (s *Server) Start(ctx context.Context) error {
-	ln, err := net.Listen("tcp", s.address)
-	if err != nil {
-		return fmt.Errorf("http listen %q: %w", s.address, err)
-	}
 
 	s.inner.BaseContext = func(net.Listener) context.Context {
 		return ctx
 	}
 
 	s.log.Info("starting",
-		"address", ln.Addr().String(),
+		"address", s.listener.Addr().String(),
 		"auth", s.authMiddleware != nil,
 		"public_paths", len(s.publicPaths),
 		"allowed_origins", s.allowedOrigins,
 	)
 
-	if err := s.inner.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	if err := s.inner.Serve(s.listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return fmt.Errorf("http serve: %w", err)
 	}
 

@@ -36,9 +36,8 @@ var _ core.TunnelConsumer = (*fleetRegistrar)(nil)
 
 // Register calls the fleet service's Register RPC with the local
 // hostname as the agent ID. It returns the tunnel endpoint, the
-// server's TLS fingerprint, an auth string in "agentID:token" format
-// that the chisel client uses for authentication, and a proxy token
-// for HTTP-level authentication of tunnelled requests.
+// server's TLS fingerprint, and an auth string in "agentID:token"
+// format that the chisel client uses for authentication.
 func (f *fleetRegistrar) Register(ctx context.Context, serverURL, cluster string) (core.Registration, error) {
 	agentID, err := os.Hostname()
 	if err != nil {
@@ -59,6 +58,5 @@ func (f *fleetRegistrar) Register(ctx context.Context, serverURL, cluster string
 		Endpoint:    resp.GetEndpoint(),
 		Fingerprint: resp.GetFingerprint(),
 		Auth:        fmt.Sprintf("%s:%s", agentID, resp.GetToken()),
-		ProxyToken:  resp.GetProxyToken(),
 	}, nil
 }

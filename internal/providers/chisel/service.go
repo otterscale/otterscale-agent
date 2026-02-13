@@ -24,11 +24,10 @@ import (
 const tunnelPort = 16598
 
 // clusterEntry holds the per-cluster tunnel state: the allocated
-// loopback host, the chisel user name, and the proxy token.
+// loopback host and the chisel user name.
 type clusterEntry struct {
-	host       string // unique 127.x.x.x loopback address
-	user       string // chisel user name
-	proxyToken string // token for HTTP-level proxy authentication
+	host string // unique 127.x.x.x loopback address
+	user string // chisel user name
 }
 
 // Service manages the mapping between cluster names and unique
@@ -83,14 +82,12 @@ func (s *Service) ListClusters() []string {
 
 // RegisterCluster associates a cluster with a unique loopback host,
 // creates a chisel user with credentials (user/pass), and returns the
-// tunnel endpoint (host:port) together with a proxy token. The server
-// must present this token on every proxied request so the agent can
-// reject direct access.
+// tunnel endpoint (host:port).
 //
 // If the cluster was previously registered, the old host allocation is
 // released so that re-registration always moves the cluster to a fresh
 // address.
-func (s *Service) RegisterCluster(cluster, user, pass, proxyToken string) (string, error) {
+func (s *Service) RegisterCluster(cluster, user, pass string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -116,9 +113,8 @@ func (s *Service) RegisterCluster(cluster, user, pass, proxyToken string) (strin
 	}
 
 	s.clusters[cluster] = &clusterEntry{
-		host:       host,
-		user:       user,
-		proxyToken: proxyToken,
+		host: host,
+		user: user,
 	}
 
 	return fmt.Sprintf("%s:%d", host, tunnelPort), nil
@@ -138,20 +134,6 @@ func (s *Service) DeregisterCluster(cluster string) {
 	s.server.DeleteUser(entry.user)
 	s.releaseHost(entry.host)
 	delete(s.clusters, cluster)
-}
-
-// ProxyToken returns the current proxy token for the given cluster.
-// Returns an error if the cluster is not registered.
-func (s *Service) ProxyToken(cluster string) (string, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	entry, ok := s.clusters[cluster]
-	if !ok {
-		return "", fmt.Errorf("cluster %s not registered", cluster)
-	}
-
-	return entry.proxyToken, nil
 }
 
 // ResolveAddress returns the HTTP base URL for the given cluster's

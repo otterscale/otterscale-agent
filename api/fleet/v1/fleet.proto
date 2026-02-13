@@ -56,8 +56,4 @@ message RegisterResponse {
 
   // The token for the agent to register with the server.
   string token = 3;
-
-  // Token the server includes on every proxied HTTP request so the
-  // agent can reject direct (non-tunnel) access.
-  string proxy_token = 4;
 }

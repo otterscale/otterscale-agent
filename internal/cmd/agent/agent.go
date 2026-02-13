@@ -5,12 +5,12 @@ package agent
 import (
 	"context"
 	"fmt"
-	"net"
 	"time"
 
 	"github.com/otterscale/otterscale-agent/internal/core"
 	"github.com/otterscale/otterscale-agent/internal/transport"
 	"github.com/otterscale/otterscale-agent/internal/transport/http"
+	"github.com/otterscale/otterscale-agent/internal/transport/pipe"
 	"github.com/otterscale/otterscale-agent/internal/transport/tunnel"
 )
 
@@ -35,16 +35,19 @@ func NewAgent(handler *Handler, tunnel core.TunnelConsumer) *Agent {
 	return &Agent{handler: handler, tunnel: tunnel}
 }
 
-// Run starts the agent. It allocates a free loopback port, creates an
-// HTTP server and a tunnel client, then blocks until ctx is cancelled.
+// Run starts the agent. It creates an in-memory pipe listener for the
+// HTTP server, a TCP bridge for chisel to forward to, and a tunnel
+// client, then blocks until ctx is cancelled.
 func (a *Agent) Run(ctx context.Context, cfg Config) error {
-	port, err := a.findFreePort()
+	pl := pipe.NewListener()
+
+	bridge, err := tunnel.NewBridge(pl)
 	if err != nil {
-		return fmt.Errorf("failed to find free port: %w", err)
+		return fmt.Errorf("failed to create tunnel bridge: %w", err)
 	}
 
 	httpSrv, err := http.NewServer(
-		http.WithAddress(fmt.Sprintf("127.0.0.1:%d", port)),
+		http.WithListener(pl),
 		http.WithMount(a.handler.Mount),
 	)
 	if err != nil {
@@ -55,7 +58,7 @@ func (a *Agent) Run(ctx context.Context, cfg Config) error {
 		tunnel.WithServerURL(cfg.ServerURL),
 		tunnel.WithTunnelServerURL(cfg.TunnelServerURL),
 		tunnel.WithCluster(cfg.Cluster),
-		tunnel.WithLocalPort(port),
+		tunnel.WithLocalPort(bridge.Port()),
 		tunnel.WithKeepAlive(cfg.TunnelTimeout),
 		tunnel.WithMaxRetryCount(6),
 		tunnel.WithMaxRetryInterval(10*time.Second),
@@ -64,31 +67,17 @@ func (a *Agent) Run(ctx context.Context, cfg Config) error {
 	if err != nil {
 		return fmt.Errorf("failed to create tunnel client: %w", err)
 	}
-	return transport.Serve(ctx, httpSrv, tunnelClt)
+	return transport.Serve(ctx, httpSrv, bridge, tunnelClt)
 }
 
-// findFreePort asks the OS for an available TCP port on localhost by
-// binding to port 0 and immediately closing the listener.
-func (a *Agent) findFreePort() (int, error) {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		return 0, err
-	}
-	port := listener.Addr().(*net.TCPAddr).Port
-	listener.Close()
-	return port, nil
-}
-
-// register wraps the register callback so that the proxy token returned
-// by the fleet server is forwarded to the handler's middleware
-// after every successful registration or re-registration.
+// register wraps the register callback so that it returns the
+// endpoint, fingerprint, and auth needed by the tunnel client.
 func (a *Agent) register() tunnel.RegisterFunc {
 	return func(ctx context.Context, serverURL, cluster string) (endpoint, fingerprint, auth string, err error) {
 		reg, err := a.tunnel.Register(ctx, serverURL, cluster)
 		if err != nil {
 			return "", "", "", err
 		}
-		a.handler.SetProxyToken(reg.ProxyToken)
 		return reg.Endpoint, reg.Fingerprint, reg.Auth, nil
 	}
 }

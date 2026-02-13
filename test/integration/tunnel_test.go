@@ -24,10 +24,10 @@ func TestFleetRegisterClusterUsesSingleSharedTunnelPort(t *testing.T) {
 		t.Fatalf("register cluster-b: %v", err)
 	}
 
-	if regA.Auth == "" || regB.Auth == "" {
-		t.Fatalf("expected non-empty tokens, got tokenA=%q tokenB=%q", regA.Auth, regB.Auth)
+	if regA.Token == "" || regB.Token == "" {
+		t.Fatalf("expected non-empty tokens, got tokenA=%q tokenB=%q", regA.Token, regB.Token)
 	}
-	if regA.Auth == regB.Auth {
+	if regA.Token == regB.Token {
 		t.Fatal("expected unique tokens per registration")
 	}
 
@@ -109,7 +109,7 @@ func TestFleetRegisterClusterReregisterAndReplaceAcrossAgents(t *testing.T) {
 		t.Fatalf("register agent-a #2: %v", err)
 	}
 
-	if regA1.Auth == regA2.Auth {
+	if regA1.Token == regA2.Token {
 		t.Fatal("expected token rotation for same agent re-register")
 	}
 
