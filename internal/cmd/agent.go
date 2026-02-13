@@ -9,6 +9,8 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"strings"
+	"time"
 
 	chclient "github.com/jpillora/chisel/client"
 	"github.com/otterscale/otterscale-agent/internal/config"
@@ -19,6 +21,23 @@ import (
 	pb "github.com/otterscale/otterscale-agent/api/fleet/v1"
 	"github.com/otterscale/otterscale-agent/api/fleet/v1/pbconnect"
 )
+
+const (
+	sessionRetryBaseDelay         = 1 * time.Second
+	sessionRetryMaxDelay          = 30 * time.Second
+	tunnelReconnectBeforeRegister = 3
+	tunnelReconnectMaxInterval    = 10 * time.Second
+)
+
+type tunnelSession interface {
+	Start(ctx context.Context) error
+	Wait() error
+	Close() error
+}
+
+type registerFunc func(context.Context, *config.Config) (registrationResult, error)
+
+type tunnelClientFactory func(*config.Config, int, registrationResult) (tunnelSession, error)
 
 // TODO: refactor to domain-driven architecture
 func NewAgentCommand(conf *config.Config) (*cobra.Command, error) {
@@ -48,31 +67,14 @@ func runAgent(ctx context.Context, conf *config.Config) error {
 		return fmt.Errorf("failed to create k8s proxy: %w", err)
 	}
 
-	// 2. Register this agent with the control plane and receive tunnel credentials.
-	reg, err := registerWithServer(ctx, conf)
-	if err != nil {
-		return fmt.Errorf("failed to register with server: %w", err)
-	}
-	slog.Info(
-		"Registered with server",
-		"fingerprint", reg.Fingerprint,
-		"endpoint", reg.Endpoint,
-	)
-
-	// 3. Listen on a random local port (target for the tunnel).
+	// 2. Listen on a random local port (target for the tunnel).
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return fmt.Errorf("failed to listen on local port: %w", err)
 	}
 	localProxyPort := listener.Addr().(*net.TCPAddr).Port
 
-	// 4. Prepare the Chisel Reverse Tunnel Client.
-	tunnelClient, err := newTunnelClient(conf, localProxyPort, reg)
-	if err != nil {
-		return fmt.Errorf("failed to create tunnel client: %w", err)
-	}
-
-	// 5. Start services (concurrently).
+	// 3. Start services (concurrently).
 	errChan := make(chan error, 1)
 
 	// Goroutine: Run the local Auth-Proxy Server.
@@ -84,24 +86,14 @@ func runAgent(ctx context.Context, conf *config.Config) error {
 		}
 	}()
 
-	// Goroutine: Run the Chisel Agent connection.
+	// Goroutine: Run the Chisel Agent connection manager.
 	go func() {
-		slog.Info(
-			"Agent connecting to server",
-			"server", serverURL,
-			"endpoint", reg.Endpoint,
-		)
-		if err := tunnelClient.Start(ctx); err != nil {
-			errChan <- fmt.Errorf("agent failed to start: %w", err)
-			return
-		}
-
-		if err := tunnelClient.Wait(); err != nil {
-			errChan <- fmt.Errorf("agent connection lost: %w", err)
+		if err := runTunnelSessionManager(ctx, conf, localProxyPort, serverURL); err != nil {
+			errChan <- err
 		}
 	}()
 
-	// 6. Wait for error or Context cancellation.
+	// 4. Wait for error or Context cancellation.
 	select {
 	case err := <-errChan:
 		return err
@@ -112,10 +104,135 @@ func runAgent(ctx context.Context, conf *config.Config) error {
 	}
 }
 
+func runTunnelSessionManager(ctx context.Context, conf *config.Config, localProxyPort int, serverURL string) error {
+	return runTunnelSessionManagerWithDeps(
+		ctx,
+		conf,
+		localProxyPort,
+		serverURL,
+		registerWithServer,
+		newTunnelClient,
+	)
+}
+
+func runTunnelSessionManagerWithDeps(
+	ctx context.Context,
+	conf *config.Config,
+	localProxyPort int,
+	serverURL string,
+	register registerFunc,
+	newClient tunnelClientFactory,
+) error {
+	retryDelay := sessionRetryBaseDelay
+
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil
+		}
+
+		reg, err := register(ctx, conf)
+		if err != nil {
+			slog.Warn("Failed to register with server, retrying", "error", err, "retry_in", retryDelay)
+			if !sleepOrDone(ctx, retryDelay) {
+				return nil
+			}
+			retryDelay = nextRetryDelay(retryDelay)
+			continue
+		}
+		retryDelay = sessionRetryBaseDelay
+
+		slog.Info("Registered with server", "fingerprint", reg.Fingerprint, "endpoint", reg.Endpoint)
+
+		tunnelClient, err := newClient(conf, localProxyPort, reg)
+		if err != nil {
+			slog.Warn("Failed to create tunnel client, retrying registration", "error", err, "retry_in", retryDelay)
+			if !sleepOrDone(ctx, retryDelay) {
+				return nil
+			}
+			retryDelay = nextRetryDelay(retryDelay)
+			continue
+		}
+
+		slog.Info("Agent connecting to server", "server", serverURL, "endpoint", reg.Endpoint)
+		if err := tunnelClient.Start(ctx); err != nil {
+			_ = tunnelClient.Close()
+			if isAuthFailure(err) {
+				slog.Warn("Agent authentication failed, re-registering immediately", "error", err)
+				continue
+			}
+			slog.Warn("Agent failed to start tunnel, retrying", "error", err, "retry_in", retryDelay)
+			if !sleepOrDone(ctx, retryDelay) {
+				return nil
+			}
+			retryDelay = nextRetryDelay(retryDelay)
+			continue
+		}
+
+		err = tunnelClient.Wait()
+		_ = tunnelClient.Close()
+
+		if ctx.Err() != nil {
+			return nil
+		}
+		if err == nil {
+			// The client stops after bounded reconnect attempts; get fresh credentials and re-register.
+			slog.Warn("Tunnel session ended, re-registering")
+			retryDelay = sessionRetryBaseDelay
+			continue
+		}
+		if isAuthFailure(err) {
+			slog.Warn("Agent authentication failed, re-registering immediately", "error", err)
+			retryDelay = sessionRetryBaseDelay
+			continue
+		}
+
+		slog.Warn("Agent connection lost, retrying registration", "error", err, "retry_in", retryDelay)
+		if !sleepOrDone(ctx, retryDelay) {
+			return nil
+		}
+		retryDelay = nextRetryDelay(retryDelay)
+	}
+}
+
+func isAuthFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "unable to authenticate") ||
+		strings.Contains(msg, "authentication failed") ||
+		strings.Contains(msg, "auth failed") ||
+		strings.Contains(msg, "unauthorized") ||
+		strings.Contains(msg, "invalid auth")
+}
+
+func sleepOrDone(ctx context.Context, d time.Duration) bool {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+
+	select {
+	case <-timer.C:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+func nextRetryDelay(current time.Duration) time.Duration {
+	if current <= 0 {
+		return sessionRetryBaseDelay
+	}
+	next := current * 2
+	if next > sessionRetryMaxDelay {
+		return sessionRetryMaxDelay
+	}
+	return next
+}
+
 // newTunnelClient creates a Chisel Client instance.
 // The fingerprint is obtained dynamically from the registration response.
 // If the agent has a statically-configured fingerprint, it takes precedence.
-func newTunnelClient(conf *config.Config, localPort int, reg registrationResult) (*chclient.Client, error) {
+func newTunnelClient(conf *config.Config, localPort int, reg registrationResult) (tunnelSession, error) {
 	var (
 		cluster   = conf.AgentCluster()
 		serverURL = conf.AgentTunnelServerURL()
@@ -150,8 +267,9 @@ func newTunnelClient(conf *config.Config, localPort int, reg registrationResult)
 			// Forward traffic from the server-assigned tunnel endpoint to the local port.
 			fmt.Sprintf("R:%s:127.0.0.1:%d", reg.Endpoint, localPort),
 		},
-		KeepAlive:     timeout,
-		MaxRetryCount: -1, // Infinite retries
+		KeepAlive:        timeout,
+		MaxRetryCount:    tunnelReconnectBeforeRegister,
+		MaxRetryInterval: tunnelReconnectMaxInterval,
 	}
 
 	return chclient.NewClient(chiselConfig)
