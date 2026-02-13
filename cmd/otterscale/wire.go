@@ -23,5 +23,5 @@ func wireServer() (*server.Server, func(), error) {
 }
 
 func wireAgent() (*agent.Agent, func(), error) {
-	panic(wire.Build(cmd.ProviderSet))
+	panic(wire.Build(cmd.ProviderSet, providers.ProviderSet))
 }

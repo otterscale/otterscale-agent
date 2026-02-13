@@ -14,6 +14,7 @@ import (
 	"github.com/otterscale/otterscale-agent/internal/core"
 	"github.com/otterscale/otterscale-agent/internal/providers/chisel"
 	"github.com/otterscale/otterscale-agent/internal/providers/kubernetes"
+	"github.com/otterscale/otterscale-agent/internal/providers/otterscale"
 	"github.com/spf13/cobra"
 )
 
@@ -48,7 +49,9 @@ func wireServer() (*server.Server, func(), error) {
 }
 
 func wireAgent() (*agent.Agent, func(), error) {
-	agentAgent := agent.NewAgent()
+	handler := agent.NewHandler()
+	tunnelConsumer := otterscale.NewFleetRegistrar()
+	agentAgent := agent.NewAgent(handler, tunnelConsumer)
 	return agentAgent, func() {
 	}, nil
 }
