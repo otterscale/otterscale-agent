@@ -46,14 +46,16 @@ type ResourceUseCase struct {
 	discovery DiscoveryClient
 	resource  ResourceRepo
 
-	schemaCache   sync.Map
+	mu            sync.RWMutex
+	schemaCache   map[string]*schemaCacheEntry
 	schemaFlights singleflight.Group
 }
 
 func NewResourceUseCase(discovery DiscoveryClient, resource ResourceRepo) *ResourceUseCase {
 	return &ResourceUseCase{
-		discovery: discovery,
-		resource:  resource,
+		discovery:   discovery,
+		resource:    resource,
+		schemaCache: make(map[string]*schemaCacheEntry),
 	}
 }
 
@@ -64,12 +66,12 @@ func (uc *ResourceUseCase) ServerResources(ctx context.Context, cluster string) 
 func (uc *ResourceUseCase) ResolveSchema(ctx context.Context, cluster, group, version, kind string) (*spec.Schema, error) {
 	key := uc.schemaCacheKey(cluster, group, version, kind)
 
-	if v, ok := uc.schemaCache.Load(key); ok {
-		entry := v.(*schemaCacheEntry)
-		if time.Now().Before(entry.expiresAt) {
-			return entry.schema, nil
-		}
-		uc.schemaCache.Delete(key)
+	uc.mu.RLock()
+	entry, ok := uc.schemaCache[key]
+	uc.mu.RUnlock()
+
+	if ok && time.Now().Before(entry.expiresAt) {
+		return entry.schema, nil
 	}
 
 	v, err, _ := uc.schemaFlights.Do(key, func() (any, error) {
@@ -78,10 +80,14 @@ func (uc *ResourceUseCase) ResolveSchema(ctx context.Context, cluster, group, ve
 			return nil, err
 		}
 
-		uc.schemaCache.Store(key, &schemaCacheEntry{
+		newEntry := &schemaCacheEntry{
 			schema:    schema,
 			expiresAt: time.Now().Add(schemaCacheTTL),
-		})
+		}
+
+		uc.mu.Lock()
+		uc.schemaCache[key] = newEntry
+		uc.mu.Unlock()
 
 		return schema, nil
 	})

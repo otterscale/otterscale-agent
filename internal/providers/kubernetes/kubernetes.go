@@ -13,13 +13,15 @@ import (
 )
 
 type Kubernetes struct {
+	mu         sync.Mutex
 	tunnel     core.TunnelProvider
-	transports sync.Map // map[string]http.RoundTripper, keyed by cluster name
+	transports map[string]http.RoundTripper // keyed by cluster name
 }
 
 func New(tunnel core.TunnelProvider) *Kubernetes {
 	return &Kubernetes{
-		tunnel: tunnel,
+		tunnel:     tunnel,
+		transports: make(map[string]http.RoundTripper),
 	}
 }
 
@@ -42,19 +44,32 @@ func (k *Kubernetes) impersonationConfig(ctx context.Context, cluster string) (*
 		},
 	}
 
-	// Share the underlying transport per cluster to avoid creating new TCP
-	// connections on every request. Impersonation is handled via HTTP headers,
-	// so the transport can safely be shared across users.
-	if t, ok := k.transports.Load(cluster); ok {
-		cfg.Transport = t.(http.RoundTripper)
-	} else {
-		t, err := rest.TransportFor(&rest.Config{Host: address})
-		if err != nil {
-			return nil, apierrors.NewInternalError(err)
-		}
-		actual, _ := k.transports.LoadOrStore(cluster, t)
-		cfg.Transport = actual.(http.RoundTripper)
+	rt, err := k.roundTripper(cluster, address)
+	if err != nil {
+		return nil, err
 	}
+	cfg.Transport = rt
 
 	return cfg, nil
+}
+
+// Share the underlying transport per cluster to avoid creating new TCP
+// connections on every request. Impersonation is handled via HTTP headers,
+// so the transport can safely be shared across users.
+func (k *Kubernetes) roundTripper(cluster, address string) (http.RoundTripper, error) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+
+	transport, ok := k.transports[cluster]
+	if ok {
+		return transport, nil
+	}
+
+	t, err := rest.TransportFor(&rest.Config{Host: address})
+	if err != nil {
+		return nil, apierrors.NewInternalError(err)
+	}
+	k.transports[cluster] = t
+
+	return t, nil
 }
