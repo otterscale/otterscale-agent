@@ -1,216 +1,167 @@
-## OtterScale Agent
+# OtterScale Agent
 
-OtterScale Agent is a hub-and-spoke service for managing Kubernetes resources across clusters through a single API.
-The **server (hub)** exposes a [ConnectRPC](https://connectrpc.com/) API and proxies requests to **agents (spokes)** running in target clusters over **Chisel reverse tunnels**.
+A hub-and-spoke gateway for managing Kubernetes resources across clusters through a single [ConnectRPC](https://connectrpc.com/) API.
 
-### High-level architecture
+The **server** (hub) authenticates requests via OIDC, then routes them through [Chisel](https://github.com/jpillora/chisel) reverse tunnels to **agents** (spokes) running inside target clusters. Agents proxy requests to the local Kubernetes API server using impersonation, so cluster RBAC is enforced at the edge.
 
-- **Server (hub)**:
-  - Exposes `otterscale.resource.v1.ResourceService` over HTTP (ConnectRPC)
-  - Authenticates end-user requests via OIDC (Keycloak), then forwards the verified subject to the agent
-  - Maintains an embedded Chisel reverse-tunnel server to reach per-cluster agents via loopback ports
-- **Agent (spoke)**:
-  - Runs in-cluster and executes Kubernetes operations using `client-go`
-  - Exposes the same ConnectRPC service locally; the server reaches it through the reverse tunnel
+```
+                  ┌──────────────────────────────────────┐
+                  │             Server (hub)              │
+ User ──OIDC──▶  │  ConnectRPC API   ◄── Chisel Tunnel ──┼──── Agent (cluster-a)
+                  │  :8299 (h2c)         :8300            │          ▼
+                  │                                       │     kube-apiserver
+                  │  Fleet + Resource                     │
+                  │  Services                             ├──── Agent (cluster-b)
+                  └──────────────────────────────────────┘          ▼
+                                                               kube-apiserver
+```
 
-### Requirements
+## Features
 
-- **Go**: `1.25.x` (see `go.mod`)
-- **Kubernetes access**:
-  - Server: optional (only needed if you enable leader election / HA in Kubernetes)
-  - Agent: required (runs in-cluster or with a usable kubeconfig)
-- **Tooling (dev only)**:
-  - `golangci-lint` for `make lint`
-  - `protoc` plus plugins for `make proto` / `make openapi` (see `Makefile`)
+- **Multi-cluster** -- manage any number of Kubernetes clusters from one endpoint.
+- **Dynamic registration** -- agents register on connect; no static per-cluster config on the server.
+- **OIDC authentication** -- bearer tokens verified against Keycloak; identity forwarded via Kubernetes impersonation.
+- **Full resource lifecycle** -- Discovery, Schema, List, Get, Create, Apply (SSA), Delete, Watch (streaming).
+- **Observability** -- OpenTelemetry tracing, Prometheus metrics at `/metrics`, gRPC health checks.
 
-## Quickstart
+## Quick Start
+
+### Prerequisites
+
+- Go 1.25+
+- A Keycloak realm (or any OIDC issuer) for token verification
+- `KUBECONFIG` or in-cluster service account for the agent
 
 ### Build
 
 ```bash
-make build
+go build -o otterscale ./cmd/otterscale
 ```
 
-This produces `./bin/otterscale`.
-
-### Run the server (hub)
+### Run the server
 
 ```bash
-./bin/otterscale server --address=:8299 --config=otterscale.yaml
+./otterscale server \
+  --address=:8299 \
+  --tunnel-address=127.0.0.1:8300 \
+  --tunnel-key-seed=my-secret-seed \
+  --keycloak-realm-url=https://keycloak.example.com/realms/otterscale \
+  --keycloak-client-id=otterscale
 ```
 
-Notes:
-- Use a **fixed port** (avoid `:0`) if you plan to run multiple server replicas with leader forwarding enabled.
-- On startup, the server logs the Chisel tunnel **fingerprint** and tunnel bind address.
-
-### Leader election (optional / Kubernetes)
-
-When running multiple server replicas in Kubernetes, the server can use a Kubernetes **Lease** for leader election and will only start the embedded tunnel server on the leader. Non-leaders can forward requests to the leader (requires a fixed `--address` port).
-
-### Run an agent (spoke)
+### Run an agent
 
 ```bash
-./bin/otterscale agent --cluster=dev --address=:8299 --config=otterscale.yaml
+./otterscale agent \
+  --cluster=production \
+  --server-url=http://server-host:8299 \
+  --tunnel-server-url=http://server-host:8300
 ```
 
-Notes:
-- `--cluster` is required and selects `clusters.<name>.*` from the config.
-- The agent maintains a long-lived connection to the server’s embedded Chisel tunnel server.
-
-### Container mode
-
-If `OTTERSCALE_CONTAINER=true` is set, both `server` and `agent` default to:
-- `--address=:8299`
-- `--config=/etc/app/otterscale.yaml`
-
-Build and run:
-
-```bash
-docker build -t otterscale-agent .
-docker run --rm \
-  -p 8299:8299 \
-  -v "$(pwd)/otterscale.yaml:/etc/app/otterscale.yaml:ro" \
-  -e OTTERSCALE_CONTAINER=true \
-  otterscale-agent server
-```
-
-Run an agent container (example):
-
-```bash
-docker run --rm \
-  -v "$(pwd)/otterscale.yaml:/etc/app/otterscale.yaml:ro" \
-  -e OTTERSCALE_CONTAINER=true \
-  otterscale-agent agent --cluster=dev
-```
+The agent registers with the server, receives a one-time tunnel token, and establishes a reverse tunnel. The server can then proxy Kubernetes API requests to the agent's cluster.
 
 ## Configuration
 
-There is no sample config checked into this repo. Below is a minimal `otterscale.yaml` you can start from.
+Values are resolved in this order (highest wins):
 
-```yaml
-keycloak:
-  # OIDC issuer URL for your Keycloak realm, for example:
-  # https://keycloak.example.com/realms/<realm>
-  realm_url: "https://keycloak.example.com/realms/otterscale"
-  # OIDC client ID used to verify ID tokens.
-  client_id: "otterscale"
+1. **CLI flags** (e.g. `--address=:8299`)
+2. **Environment variables** (prefix `OTTERSCALE_`, dots become underscores: `OTTERSCALE_SERVER_ADDRESS`)
+3. **Config file** (`config.yaml` in `.` or `/etc/otterscale/`)
+4. **Compiled defaults**
 
-tunnel:
-  server:
-    # Bind address for the embedded Chisel reverse-tunnel server.
-    host: "0.0.0.0"
-    port: "8300"
-    # Provide ONE of the following:
-    # key_file: "/path/to/chisel-ecdsa-privatekey.pem"
-    key_seed: "change-me"
+### Server flags
 
-clusters:
-  dev:
-    agent:
-      # Basic auth used by the agent when connecting to the server tunnel.
-      auth:
-        user: "dev-agent"
-        pass: "dev-agent-password"
-      # Expected server tunnel fingerprint (agent-side). This is printed by the server on startup.
-      fingerprint: "SERVER_TUNNEL_FINGERPRINT"
-      # Reverse tunnel port opened on the SERVER loopback interface (127.0.0.1:<tunnel_port>).
-      tunnel_port: 51001
-      # Agent local API port that will be exposed through the tunnel.
-      api_port: 8299
+| Flag | Env | Default | Description |
+|------|-----|---------|-------------|
+| `--address` | `OTTERSCALE_SERVER_ADDRESS` | `:8299` | HTTP listen address |
+| `--allowed-origins` | `OTTERSCALE_SERVER_ALLOWED_ORIGINS` | `[]` | CORS allowed origins |
+| `--tunnel-address` | `OTTERSCALE_SERVER_TUNNEL_ADDRESS` | `127.0.0.1:8300` | Chisel tunnel listen address |
+| `--tunnel-key-seed` | `OTTERSCALE_SERVER_TUNNEL_KEY_SEED` | `change-me` | Deterministic key seed for tunnel TLS |
+| `--keycloak-realm-url` | `OTTERSCALE_SERVER_KEYCLOAK_REALM_URL` | | Keycloak OIDC issuer URL |
+| `--keycloak-client-id` | `OTTERSCALE_SERVER_KEYCLOAK_CLIENT_ID` | `otterscale` | Expected `aud` claim |
+
+### Agent flags
+
+| Flag | Env | Default | Description |
+|------|-----|---------|-------------|
+| `--cluster` | `OTTERSCALE_AGENT_CLUSTER` | `default` | Cluster name for registration |
+| `--server-url` | `OTTERSCALE_AGENT_SERVER_URL` | `http://127.0.0.1:8299` | Fleet server URL |
+| `--tunnel-server-url` | `OTTERSCALE_AGENT_TUNNEL_SERVER_URL` | `http://127.0.0.1:8300` | Chisel tunnel server URL |
+| `--tunnel-timeout` | `OTTERSCALE_AGENT_TUNNEL_TIMEOUT` | `30s` | Tunnel keep-alive interval |
+
+## Architecture
+
+```
+cmd/otterscale/          Entry point, Wire DI
+internal/
+├── app/                 ConnectRPC service handlers (Fleet, Resource)
+├── cmd/
+│   ├── agent/           Agent runtime (reverse proxy + tunnel client)
+│   └── server/          Server runtime (HTTP + tunnel listener)
+├── config/              Viper-based configuration
+├── core/                Domain interfaces and use-cases
+├── middleware/           OIDC authentication middleware
+├── providers/
+│   ├── chisel/          TunnelProvider (loopback-per-cluster addressing)
+│   ├── kubernetes/      DiscoveryClient + ResourceRepo via client-go
+│   └── otterscale/      TunnelConsumer (fleet registration client)
+└── transport/
+    ├── http/            HTTP/H2C server with CORS + auth middleware
+    └── tunnel/          Chisel tunnel client and server wrappers
+api/
+├── fleet/v1/            Fleet service protobuf + generated code
+└── resource/v1/         Resource service protobuf + generated code
+test/
+└── integration/         Integration tests
 ```
 
-### Required settings (minimal)
+### How it works
 
-- **`keycloak.realm_url` / `keycloak.client_id`**: used by the server to verify incoming OIDC ID tokens.
-- **`tunnel.server.*`**:
-  - `host`/`port`: where the embedded Chisel reverse-tunnel server binds (and where agents connect).
-  - `key_seed` **or** `key_file` is required; without one, the server will fail to start the tunnel server.
-- **`clusters.<name>.agent.*`** (per cluster):
-  - `auth.user` / `auth.pass`: basic auth credentials the agent uses to connect to the tunnel.
-  - `tunnel_port`: the **server-local loopback** port reserved for that cluster (must be unique per cluster).
-  - `fingerprint`: the expected Chisel server fingerprint (agent-side trust).
-  - `api_port`: agent listen port (used to form the reverse tunnel target; also used if you run the agent with `--address=:0`).
+1. The **server** starts an HTTP server (ConnectRPC) and a Chisel tunnel listener.
+2. An **agent** calls `FleetService.Register` to obtain a tunnel endpoint, TLS fingerprint, and one-time token.
+3. The agent opens a Chisel reverse tunnel, exposing its local Kubernetes API proxy to the server via a unique loopback address (e.g. `127.42.1.1:16598`).
+4. When a user calls `ResourceService.List` (or any resource RPC), the server resolves the cluster to its loopback address and proxies the request through the tunnel. The agent impersonates the authenticated user against the real kube-apiserver.
 
-### Getting the tunnel fingerprint
+### Security model
 
-Start the server once and copy the `fingerprint` value from its startup logs (it is printed when the tunnel server starts), then paste it into `clusters.<name>.agent.fingerprint`.
-
-### How tunnels are wired
-
-For each cluster, the agent requests a Chisel reverse remote like:
-
-- `R:127.0.0.1:<tunnel_port>:127.0.0.1:<agent_api_port>`
-
-Then the server reaches the agent API at:
-
-- `http://127.0.0.1:<tunnel_port>`
+- **User -> Server**: OIDC bearer token verified against Keycloak. Unauthenticated paths: health, reflection, fleet registration.
+- **Server -> Agent**: requests forwarded through the Chisel tunnel with Kubernetes impersonation headers carrying the verified user identity.
+- **Agent -> kube-apiserver**: in-cluster service account with impersonation privileges. RBAC is enforced by the target cluster.
 
 ## API
 
-### Protocol and docs
+**Protocol**: ConnectRPC over HTTP/1.1 and h2c (unencrypted HTTP/2).
 
-- **Protocol**: ConnectRPC over HTTP/1.1 and h2c (unencrypted HTTP/2)
-- **OpenAPI**: see [`api/openapi.yaml`](api/openapi.yaml)
-- **Protobuf**: see [`api/resource/v1/resource.proto`](api/resource/v1/resource.proto)
+### FleetService
 
-### HTTP endpoints
+| RPC | Description |
+|-----|-------------|
+| `ListClusters` | List all registered clusters |
+| `Register` | Register an agent and obtain tunnel credentials |
 
-Server endpoints:
-- **ConnectRPC service** (all `POST`):
-  - `/otterscale.resource.v1.ResourceService/Discovery`
-  - `/otterscale.resource.v1.ResourceService/Schema`
-  - `/otterscale.resource.v1.ResourceService/List`
-  - `/otterscale.resource.v1.ResourceService/Get`
-  - `/otterscale.resource.v1.ResourceService/Create`
-  - `/otterscale.resource.v1.ResourceService/Apply`
-  - `/otterscale.resource.v1.ResourceService/Delete`
-  - `/otterscale.resource.v1.ResourceService/Watch` (server-streaming)
-- **Metrics**: `GET /metrics`
-- **gRPC health / reflection**: enabled (use your Connect/gRPC tooling; exact paths depend on the client)
+### ResourceService
 
-Agent endpoints:
-- **Health**: `GET /ping` (returns `204 No Content`)
-- **ConnectRPC service**: same service paths as above (intended to be reached via the server tunnel, not directly)
+| RPC | Description |
+|-----|-------------|
+| `Discovery` | List available API resources on a cluster |
+| `Schema` | Fetch OpenAPI schema for a GVK |
+| `List` | List resources with label/field selectors and pagination |
+| `Get` | Get a single resource by name |
+| `Create` | Create a resource from a YAML manifest |
+| `Apply` | Server-side apply (SSA) a manifest |
+| `Delete` | Delete a resource |
+| `Watch` | Stream real-time watch events (server-streaming) |
 
-### Resource service
-
-Service: `otterscale.resource.v1.ResourceService`
-
-Main operations:
-- `Discovery`: list available Kubernetes API resources in a cluster
-- `Schema`: fetch JSON schema for a Kind (native resources or CRDs)
-- `List`, `Get`: read resources
-- `Create`: create from manifest
-- `Apply`: server-side apply (SSA) for partial updates
-- `Delete`: delete resources
-- `Watch`: stream watch events
-
-## Observability
-
-- **Metrics** (server): `GET /metrics`
-
-## Security notes
-
-- **Server**: verifies `Authorization: Bearer <token>` using OIDC (Keycloak). The verified subject is stored in request context.
-- **Server -> Agent**: the server propagates the verified subject via a trusted header `X-Otterscale-Subject`.
-- **Agent**: trusts `X-Otterscale-Subject` and rejects requests without it.
-
-Important:
-- Do **not** expose the agent’s HTTP API directly to end users. It is intended to be reached only via the server-controlled reverse tunnel.
+Protobuf definitions: [`api/fleet/v1/fleet.proto`](api/fleet/v1/fleet.proto), [`api/resource/v1/resource.proto`](api/resource/v1/resource.proto).
 
 ## Development
 
-Common targets:
-
 ```bash
-make build
-make test
-make lint
-make proto
-make openapi
+go build ./...        # build
+go test ./...         # test
+go vet ./...          # vet
 ```
 
 ## License
 
-Apache-2.0. See [`LICENSE`](LICENSE).
-
+Apache-2.0
