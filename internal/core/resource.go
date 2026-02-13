@@ -43,10 +43,9 @@ type DiscoveryClient interface {
 // that the underlying implementation can route requests through the
 // correct tunnel.
 type ResourceRepo interface {
-	// List returns a paged list of resources matching the given selectors.
+	// List returns a paged list of resources matching the given options.
 	List(ctx context.Context, cluster string, gvr schema.GroupVersionResource,
-		namespace, labelSelector, fieldSelector string,
-		limit int64, continueToken string,
+		namespace string, opts ListOptions,
 	) (*unstructured.UnstructuredList, error)
 
 	// Get returns a single resource by name.
@@ -62,25 +61,58 @@ type ResourceRepo interface {
 	// Apply performs a server-side apply (PATCH with ApplyPatchType) for
 	// the given resource.
 	Apply(ctx context.Context, cluster string, gvr schema.GroupVersionResource,
-		namespace, name string, data []byte, force bool, fieldManager string,
+		namespace, name string, data []byte, opts ApplyOptions,
 	) (*unstructured.Unstructured, error)
 
-	// Delete removes a resource. An optional gracePeriodSeconds overrides
-	// the default deletion grace period.
+	// Delete removes a resource.
 	Delete(ctx context.Context, cluster string, gvr schema.GroupVersionResource,
-		namespace, name string, gracePeriodSeconds *int64,
+		namespace, name string, opts DeleteOptions,
 	) error
 
 	// Watch opens a long-lived watch stream for resources matching the
-	// given selectors.
+	// given options.
 	Watch(ctx context.Context, cluster string, gvr schema.GroupVersionResource,
-		namespace, labelSelector, fieldSelector, resourceVersion string,
-		sendInitialEvents bool,
+		namespace string, opts WatchOptions,
 	) (watch.Interface, error)
 
-	// ListEvents returns events matching the given field selector
-	// (e.g., involvedObject.uid=xxx). Used by DescribeResource.
-	ListEvents(ctx context.Context, cluster, namespace, fieldSelector string) (*unstructured.UnstructuredList, error)
+	// ListEvents returns events matching the given options.
+	// Used by DescribeResource to fetch events via involvedObject.uid.
+	ListEvents(ctx context.Context, cluster, namespace string, opts ListOptions) (*unstructured.UnstructuredList, error)
+}
+
+// ---------------------------------------------------------------------------
+// Options types
+// ---------------------------------------------------------------------------
+
+// ListOptions configures a resource list or event list query.
+// Mirrors the commonly used fields of metav1.ListOptions.
+type ListOptions struct {
+	LabelSelector string
+	FieldSelector string
+	Limit         int64
+	Continue      string
+}
+
+// ApplyOptions configures a server-side apply operation.
+// Mirrors the commonly used fields of metav1.PatchOptions.
+type ApplyOptions struct {
+	Force        bool
+	FieldManager string
+}
+
+// DeleteOptions configures a resource deletion.
+// Mirrors the commonly used fields of metav1.DeleteOptions.
+type DeleteOptions struct {
+	GracePeriodSeconds *int64
+}
+
+// WatchOptions configures a watch stream.
+// Mirrors the commonly used fields of metav1.ListOptions for watch.
+type WatchOptions struct {
+	LabelSelector     string
+	FieldSelector     string
+	ResourceVersion   string
+	SendInitialEvents bool
 }
 
 // ---------------------------------------------------------------------------
@@ -188,16 +220,14 @@ func (uc *ResourceUseCase) ResolveSchema(
 func (uc *ResourceUseCase) ListResources(
 	ctx context.Context,
 	cluster, group, version, resource, namespace string,
-	labelSelector, fieldSelector string,
-	limit int64,
-	continueToken string,
+	opts ListOptions,
 ) (*unstructured.UnstructuredList, error) {
 	gvr, err := uc.discovery.LookupResource(ctx, cluster, group, version, resource)
 	if err != nil {
 		return nil, err
 	}
 
-	list, err := uc.resource.List(ctx, cluster, gvr, namespace, labelSelector, fieldSelector, limit, continueToken)
+	list, err := uc.resource.List(ctx, cluster, gvr, namespace, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -241,9 +271,10 @@ func (uc *ResourceUseCase) DescribeResource(
 	}
 
 	uid := string(obj.GetUID())
-	fieldSelector := fmt.Sprintf("involvedObject.uid=%s", uid)
 
-	events, err := uc.resource.ListEvents(ctx, cluster, namespace, fieldSelector)
+	events, err := uc.resource.ListEvents(ctx, cluster, namespace, ListOptions{
+		FieldSelector: fmt.Sprintf("involvedObject.uid=%s", uid),
+	})
 	if err != nil {
 		// Events are supplementary; return the resource even if event
 		// listing fails (e.g. RBAC restrictions on events).
@@ -279,8 +310,7 @@ func (uc *ResourceUseCase) ApplyResource(
 	ctx context.Context,
 	cluster, group, version, resource, namespace, name string,
 	manifest []byte,
-	force bool,
-	fieldManager string,
+	opts ApplyOptions,
 ) (*unstructured.Unstructured, error) {
 	gvr, err := uc.discovery.LookupResource(ctx, cluster, group, version, resource)
 	if err != nil {
@@ -297,21 +327,21 @@ func (uc *ResourceUseCase) ApplyResource(
 		return nil, err
 	}
 
-	return uc.resource.Apply(ctx, cluster, gvr, namespace, name, data, force, fieldManager)
+	return uc.resource.Apply(ctx, cluster, gvr, namespace, name, data, opts)
 }
 
 // DeleteResource validates the GVR and deletes the named resource.
 func (uc *ResourceUseCase) DeleteResource(
 	ctx context.Context,
 	cluster, group, version, resource, namespace, name string,
-	gracePeriodSeconds *int64,
+	opts DeleteOptions,
 ) error {
 	gvr, err := uc.discovery.LookupResource(ctx, cluster, group, version, resource)
 	if err != nil {
 		return err
 	}
 
-	return uc.resource.Delete(ctx, cluster, gvr, namespace, name, gracePeriodSeconds)
+	return uc.resource.Delete(ctx, cluster, gvr, namespace, name, opts)
 }
 
 // WatchResource validates the GVR and opens a long-lived watch stream.
@@ -320,7 +350,7 @@ func (uc *ResourceUseCase) DeleteResource(
 func (uc *ResourceUseCase) WatchResource(
 	ctx context.Context,
 	cluster, group, version, resource, namespace string,
-	labelSelector, fieldSelector, resourceVersion string,
+	opts WatchOptions,
 ) (watch.Interface, error) {
 	gvr, err := uc.discovery.LookupResource(ctx, cluster, group, version, resource)
 	if err != nil {
@@ -332,7 +362,8 @@ func (uc *ResourceUseCase) WatchResource(
 		return nil, err
 	}
 
-	return uc.resource.Watch(ctx, cluster, gvr, namespace, labelSelector, fieldSelector, resourceVersion, watchListFeature)
+	opts.SendInitialEvents = watchListFeature
+	return uc.resource.Watch(ctx, cluster, gvr, namespace, opts)
 }
 
 // ---------------------------------------------------------------------------

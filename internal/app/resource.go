@@ -92,10 +92,12 @@ func (s *ResourceService) List(ctx context.Context, req *pb.ListRequest) (*pb.Li
 		req.GetVersion(),
 		req.GetResource(),
 		req.GetNamespace(),
-		req.GetLabelSelector(),
-		req.GetFieldSelector(),
-		req.GetLimit(),
-		req.GetContinue(),
+		core.ListOptions{
+			LabelSelector: req.GetLabelSelector(),
+			FieldSelector: req.GetFieldSelector(),
+			Limit:         req.GetLimit(),
+			Continue:      req.GetContinue(),
+		},
 	)
 	if err != nil {
 		return nil, k8sErrorToConnectError(err)
@@ -159,8 +161,10 @@ func (s *ResourceService) Apply(ctx context.Context, req *pb.ApplyRequest) (*pb.
 		req.GetNamespace(),
 		req.GetName(),
 		req.GetManifest(),
-		req.GetForce(),
-		req.GetFieldManager(),
+		core.ApplyOptions{
+			Force:        req.GetForce(),
+			FieldManager: req.GetFieldManager(),
+		},
 	)
 	if err != nil {
 		return nil, k8sErrorToConnectError(err)
@@ -171,10 +175,10 @@ func (s *ResourceService) Apply(ctx context.Context, req *pb.ApplyRequest) (*pb.
 // Delete removes the named resource. An optional grace period may be
 // specified in the request.
 func (s *ResourceService) Delete(ctx context.Context, req *pb.DeleteRequest) (*emptypb.Empty, error) {
-	var gracePeriod *int64
+	var opts core.DeleteOptions
 	if req.HasGracePeriodSeconds() {
 		v := req.GetGracePeriodSeconds()
-		gracePeriod = &v
+		opts.GracePeriodSeconds = &v
 	}
 
 	if err := s.resource.DeleteResource(
@@ -185,7 +189,7 @@ func (s *ResourceService) Delete(ctx context.Context, req *pb.DeleteRequest) (*e
 		req.GetResource(),
 		req.GetNamespace(),
 		req.GetName(),
-		gracePeriod,
+		opts,
 	); err != nil {
 		return nil, k8sErrorToConnectError(err)
 	}
@@ -243,9 +247,11 @@ func (s *ResourceService) Watch(ctx context.Context, req *pb.WatchRequest, strea
 		req.GetVersion(),
 		req.GetResource(),
 		req.GetNamespace(),
-		req.GetLabelSelector(),
-		req.GetFieldSelector(),
-		req.GetResourceVersion(),
+		core.WatchOptions{
+			LabelSelector:   req.GetLabelSelector(),
+			FieldSelector:   req.GetFieldSelector(),
+			ResourceVersion: req.GetResourceVersion(),
+		},
 	)
 	if err != nil {
 		return k8sErrorToConnectError(err)

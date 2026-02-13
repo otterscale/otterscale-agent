@@ -33,28 +33,27 @@ var _ core.ResourceRepo = (*resourceRepo)(nil)
 // CRUD
 // ---------------------------------------------------------------------------
 
-// List returns a paged list of resources matching the given selectors.
+// List returns a paged list of resources matching the given options.
 func (r *resourceRepo) List(
 	ctx context.Context,
 	cluster string,
 	gvr schema.GroupVersionResource,
-	namespace, labelSelector, fieldSelector string,
-	limit int64,
-	continueToken string,
+	namespace string,
+	opts core.ListOptions,
 ) (*unstructured.UnstructuredList, error) {
 	client, err := r.client(ctx, cluster)
 	if err != nil {
 		return nil, err
 	}
 
-	opts := metav1.ListOptions{
-		LabelSelector: labelSelector,
-		FieldSelector: fieldSelector,
-		Limit:         limit,
-		Continue:      continueToken,
+	listOpts := metav1.ListOptions{
+		LabelSelector: opts.LabelSelector,
+		FieldSelector: opts.FieldSelector,
+		Limit:         opts.Limit,
+		Continue:      opts.Continue,
 	}
 
-	return client.Resource(gvr).Namespace(namespace).List(ctx, opts)
+	return client.Resource(gvr).Namespace(namespace).List(ctx, listOpts)
 }
 
 // Get returns a single resource by name.
@@ -97,41 +96,39 @@ func (r *resourceRepo) Apply(
 	gvr schema.GroupVersionResource,
 	namespace, name string,
 	data []byte,
-	force bool,
-	fieldManager string,
+	opts core.ApplyOptions,
 ) (*unstructured.Unstructured, error) {
 	client, err := r.client(ctx, cluster)
 	if err != nil {
 		return nil, err
 	}
 
-	opts := metav1.PatchOptions{
-		Force:        &force,
-		FieldManager: fieldManager,
+	patchOpts := metav1.PatchOptions{
+		Force:        &opts.Force,
+		FieldManager: opts.FieldManager,
 	}
 
-	return client.Resource(gvr).Namespace(namespace).Patch(ctx, name, types.ApplyPatchType, data, opts)
+	return client.Resource(gvr).Namespace(namespace).Patch(ctx, name, types.ApplyPatchType, data, patchOpts)
 }
 
-// Delete removes a resource. An optional gracePeriodSeconds overrides
-// the default deletion grace period.
+// Delete removes a resource.
 func (r *resourceRepo) Delete(
 	ctx context.Context,
 	cluster string,
 	gvr schema.GroupVersionResource,
 	namespace, name string,
-	gracePeriodSeconds *int64,
+	opts core.DeleteOptions,
 ) error {
 	client, err := r.client(ctx, cluster)
 	if err != nil {
 		return err
 	}
 
-	opts := metav1.DeleteOptions{
-		GracePeriodSeconds: gracePeriodSeconds,
+	deleteOpts := metav1.DeleteOptions{
+		GracePeriodSeconds: opts.GracePeriodSeconds,
 	}
 
-	return client.Resource(gvr).Namespace(namespace).Delete(ctx, name, opts)
+	return client.Resource(gvr).Namespace(namespace).Delete(ctx, name, deleteOpts)
 }
 
 // ---------------------------------------------------------------------------
@@ -139,35 +136,35 @@ func (r *resourceRepo) Delete(
 // ---------------------------------------------------------------------------
 
 // Watch opens a long-lived watch stream for resources matching the
-// given selectors. When sendInitialEvents is true, the server streams
+// given options. When SendInitialEvents is true, the server streams
 // the current state before switching to change notifications (requires
 // Kubernetes >= 1.34).
 func (r *resourceRepo) Watch(
 	ctx context.Context,
 	cluster string,
 	gvr schema.GroupVersionResource,
-	namespace, labelSelector, fieldSelector, resourceVersion string,
-	sendInitialEvents bool,
+	namespace string,
+	opts core.WatchOptions,
 ) (watch.Interface, error) {
 	client, err := r.client(ctx, cluster)
 	if err != nil {
 		return nil, err
 	}
 
-	opts := metav1.ListOptions{
-		LabelSelector:       labelSelector,
-		FieldSelector:       fieldSelector,
+	listOpts := metav1.ListOptions{
+		LabelSelector:       opts.LabelSelector,
+		FieldSelector:       opts.FieldSelector,
 		Watch:               true,
 		AllowWatchBookmarks: true,
-		ResourceVersion:     resourceVersion,
+		ResourceVersion:     opts.ResourceVersion,
 	}
 
-	if sendInitialEvents {
-		opts.ResourceVersionMatch = metav1.ResourceVersionMatchNotOlderThan
-		opts.SendInitialEvents = &sendInitialEvents
+	if opts.SendInitialEvents {
+		listOpts.ResourceVersionMatch = metav1.ResourceVersionMatchNotOlderThan
+		listOpts.SendInitialEvents = &opts.SendInitialEvents
 	}
 
-	return client.Resource(gvr).Namespace(namespace).Watch(ctx, opts)
+	return client.Resource(gvr).Namespace(namespace).Watch(ctx, listOpts)
 }
 
 // ---------------------------------------------------------------------------
@@ -177,23 +174,27 @@ func (r *resourceRepo) Watch(
 // eventsGVR is the GroupVersionResource for core/v1 Events.
 var eventsGVR = schema.GroupVersionResource{Group: "", Version: "v1", Resource: "events"}
 
-// ListEvents returns events matching the given field selector. This is
+// ListEvents returns events matching the given options. This is
 // used by DescribeResource to fetch events related to a specific
 // resource via involvedObject.uid.
 func (r *resourceRepo) ListEvents(
 	ctx context.Context,
-	cluster, namespace, fieldSelector string,
+	cluster, namespace string,
+	opts core.ListOptions,
 ) (*unstructured.UnstructuredList, error) {
 	client, err := r.client(ctx, cluster)
 	if err != nil {
 		return nil, err
 	}
 
-	opts := metav1.ListOptions{
-		FieldSelector: fieldSelector,
+	listOpts := metav1.ListOptions{
+		LabelSelector: opts.LabelSelector,
+		FieldSelector: opts.FieldSelector,
+		Limit:         opts.Limit,
+		Continue:      opts.Continue,
 	}
 
-	return client.Resource(eventsGVR).Namespace(namespace).List(ctx, opts)
+	return client.Resource(eventsGVR).Namespace(namespace).List(ctx, listOpts)
 }
 
 // ---------------------------------------------------------------------------

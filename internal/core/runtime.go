@@ -13,7 +13,33 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// Repository interface
+// Interfaces
+// ---------------------------------------------------------------------------
+
+// RuntimeRepo abstracts Kubernetes runtime operations (logs, exec,
+// scale, restart, port-forward). All methods accept a cluster name so
+// that the underlying implementation can route requests through the
+// correct tunnel.
+type RuntimeRepo interface {
+	// PodLogs opens a streaming reader for container log output.
+	PodLogs(ctx context.Context, cluster, namespace, name string, opts PodLogOptions) (io.ReadCloser, error)
+	// Exec starts an exec session and blocks until it completes.
+	Exec(ctx context.Context, cluster, namespace, name string, opts ExecOptions) error
+	// GetScale reads the current replica count via the /scale subresource.
+	GetScale(ctx context.Context, cluster string, gvr schema.GroupVersionResource, namespace, name string) (int32, error)
+	// UpdateScale sets the desired replica count via the /scale subresource
+	// and returns the updated value.
+	UpdateScale(ctx context.Context, cluster string, gvr schema.GroupVersionResource, namespace, name string, replicas int32) (int32, error)
+	// Restart triggers a rolling restart by patching the pod template annotation.
+	Restart(ctx context.Context, cluster string, gvr schema.GroupVersionResource, namespace, name string) error
+	// PortForward opens a port-forward session and copies data
+	// bidirectionally until the context is cancelled or the
+	// connection closes.
+	PortForward(ctx context.Context, cluster, namespace, name string, opts PortForwardOptions) error
+}
+
+// ---------------------------------------------------------------------------
+// Options types
 // ---------------------------------------------------------------------------
 
 // PodLogOptions mirrors the fields of corev1.PodLogOptions that are
@@ -40,26 +66,11 @@ type ExecOptions struct {
 	SizeQueue remotecommand.TerminalSizeQueue
 }
 
-// RuntimeRepo abstracts Kubernetes runtime operations (logs, exec,
-// scale, restart, port-forward). All methods accept a cluster name so
-// that the underlying implementation can route requests through the
-// correct tunnel.
-type RuntimeRepo interface {
-	// PodLogs opens a streaming reader for container log output.
-	PodLogs(ctx context.Context, cluster, namespace, name string, opts PodLogOptions) (io.ReadCloser, error)
-	// Exec starts an exec session and blocks until it completes.
-	Exec(ctx context.Context, cluster, namespace, name string, opts ExecOptions) error
-	// GetScale reads the current replica count via the /scale subresource.
-	GetScale(ctx context.Context, cluster string, gvr schema.GroupVersionResource, namespace, name string) (int32, error)
-	// UpdateScale sets the desired replica count via the /scale subresource
-	// and returns the updated value.
-	UpdateScale(ctx context.Context, cluster string, gvr schema.GroupVersionResource, namespace, name string, replicas int32) (int32, error)
-	// Restart triggers a rolling restart by patching the pod template annotation.
-	Restart(ctx context.Context, cluster string, gvr schema.GroupVersionResource, namespace, name string) error
-	// PortForward opens a port-forward session and copies data
-	// bidirectionally until the context is cancelled or the
-	// connection closes.
-	PortForward(ctx context.Context, cluster, namespace, name string, port int32, stdin io.Reader, stdout io.Writer) error
+// PortForwardOptions holds parameters for a port-forward session.
+type PortForwardOptions struct {
+	Port   int32
+	Stdin  io.Reader
+	Stdout io.Writer
 }
 
 // ---------------------------------------------------------------------------
@@ -142,9 +153,9 @@ type PortForwardSession struct {
 
 // SessionStore manages active exec and port-forward sessions.
 type SessionStore struct {
-	mu         sync.RWMutex
-	execSess   map[string]*ExecSession
-	pfSess     map[string]*PortForwardSession
+	mu       sync.RWMutex
+	execSess map[string]*ExecSession
+	pfSess   map[string]*PortForwardSession
 }
 
 // NewSessionStore returns an initialised SessionStore.
@@ -343,7 +354,11 @@ func (uc *RuntimeUseCase) StartPortForward(ctx context.Context, cluster, namespa
 
 	go func() {
 		defer dataOutW.Close()
-		errCh <- uc.runtime.PortForward(ctx, cluster, namespace, name, port, dataInR, dataOutW)
+		errCh <- uc.runtime.PortForward(ctx, cluster, namespace, name, PortForwardOptions{
+			Port:   port,
+			Stdin:  dataInR,
+			Stdout: dataOutW,
+		})
 	}()
 
 	uc.sessions.PutPortForward(sess)

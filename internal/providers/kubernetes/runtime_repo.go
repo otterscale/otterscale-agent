@@ -203,7 +203,7 @@ func (r *runtimeRepo) Restart(ctx context.Context, cluster string, gvr schema.Gr
 
 // PortForward opens a port-forward session via SPDY and copies data
 // bidirectionally between the caller's stdin/stdout and the pod.
-func (r *runtimeRepo) PortForward(ctx context.Context, cluster, namespace, name string, port int32, stdin io.Reader, stdout io.Writer) error {
+func (r *runtimeRepo) PortForward(ctx context.Context, cluster, namespace, name string, opts core.PortForwardOptions) error {
 	config, err := r.spdyConfig(ctx, cluster)
 	if err != nil {
 		return err
@@ -232,7 +232,7 @@ func (r *runtimeRepo) PortForward(ctx context.Context, cluster, namespace, name 
 	}
 	defer streamConn.Close()
 
-	portStr := strconv.FormatInt(int64(port), 10)
+	portStr := strconv.FormatInt(int64(opts.Port), 10)
 	requestID := "0"
 
 	// Create error stream.
@@ -274,12 +274,12 @@ func (r *runtimeRepo) PortForward(ctx context.Context, cluster, namespace, name 
 	errCh := make(chan error, 2)
 
 	go func() {
-		_, err := io.Copy(dataStream, stdin)
+		_, err := io.Copy(dataStream, opts.Stdin)
 		errCh <- err
 	}()
 
 	go func() {
-		_, err := io.Copy(stdout, dataStream)
+		_, err := io.Copy(opts.Stdout, dataStream)
 		errCh <- err
 	}()
 
