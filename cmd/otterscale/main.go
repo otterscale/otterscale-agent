@@ -1,3 +1,11 @@
+// Package main is the entry point for the otterscale binary. It
+// supports two subcommands:
+//
+//   - server: runs the control-plane (gRPC API + tunnel listener)
+//   - agent:  runs inside a Kubernetes cluster and reverse-proxies
+//     API requests through the tunnel
+//
+// Dependencies are assembled via Google Wire; see wire.go.
 package main
 
 import (
@@ -15,43 +23,43 @@ import (
 	"github.com/otterscale/otterscale-agent/internal/config"
 )
 
-// version is typically injected at build time via -ldflags.
+// version is injected at build time via -ldflags
+// (e.g. -ldflags "-X main.version=v1.2.3").
 var version = "devel"
 
 func main() {
-	// The context will be canceled when SIGINT (Ctrl+C) or SIGTERM is received.
+	// Cancel on SIGINT (Ctrl+C) or SIGTERM (container runtime).
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	if err := run(ctx); err != nil {
-		// Handle final error output and exit code here.
-		// Since Cobra is set to SilenceErrors: true, we must print the error explicitly.
+		// Cobra is configured with SilenceErrors: true, so we
+		// print the error here for consistent formatting.
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 }
 
+// run wires all dependencies and executes the root Cobra command.
 func run(ctx context.Context) error {
-	// wireCmd assembles all dependencies and returns the root command and a cleanup function.
 	rootCmd, cleanup, err := wireCmd()
 	if err != nil {
 		return fmt.Errorf("failed to initialize application: %w", err)
 	}
-	// Ensure cleanup (closing DB connections, file handles, etc.) is executed when run returns.
 	defer cleanup()
 
-	// ExecuteContext listens to ctx.Done() and propagates the cancellation signal to subcommands.
 	return rootCmd.ExecuteContext(ctx)
 }
 
-// newCmd is a Wire provider responsible for constructing the Root Command.
+// newCmd is a Wire provider that constructs the root Cobra command and
+// registers the server and agent subcommands.
 func newCmd(conf *config.Config) (*cobra.Command, error) {
 	c := &cobra.Command{
 		Use:           "otterscale",
 		Short:         "OtterScale: A unified platform for simplified compute, storage, and networking.",
 		Version:       version,
-		SilenceUsage:  true, // Do not show usage on error, unless it is a flag/argument error.
-		SilenceErrors: true, // Silence errors here so we can handle printing centrally in main.
+		SilenceUsage:  true,
+		SilenceErrors: true,
 	}
 
 	serverCmd, err := cmd.NewServerCommand(conf, func() (*server.Server, func(), error) {

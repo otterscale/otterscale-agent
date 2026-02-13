@@ -1,3 +1,5 @@
+// Package agent implements the agent-side runtime that reverse-proxies
+// Kubernetes API requests received through a chisel tunnel.
 package agent
 
 import (
@@ -12,6 +14,7 @@ import (
 	"github.com/otterscale/otterscale-agent/internal/transport/tunnel"
 )
 
+// Config holds the runtime parameters for an Agent.
 type Config struct {
 	Cluster         string
 	ServerURL       string
@@ -19,15 +22,21 @@ type Config struct {
 	TunnelTimeout   time.Duration
 }
 
+// Agent binds a local HTTP reverse-proxy to a dynamically allocated
+// port and exposes it to the control-plane via a chisel tunnel.
 type Agent struct {
 	handler *Handler
 	tunnel  core.TunnelConsumer
 }
 
+// NewAgent returns an Agent wired to the given handler and tunnel
+// consumer.
 func NewAgent(handler *Handler, tunnel core.TunnelConsumer) *Agent {
 	return &Agent{handler: handler, tunnel: tunnel}
 }
 
+// Run starts the agent. It allocates a free loopback port, creates an
+// HTTP server and a tunnel client, then blocks until ctx is cancelled.
 func (a *Agent) Run(ctx context.Context, cfg Config) error {
 	port, err := a.findFreePort()
 	if err != nil {
@@ -57,6 +66,8 @@ func (a *Agent) Run(ctx context.Context, cfg Config) error {
 	return transport.Serve(ctx, httpSrv, tunnelClt)
 }
 
+// findFreePort asks the OS for an available TCP port on localhost by
+// binding to port 0 and immediately closing the listener.
 func (a *Agent) findFreePort() (int, error) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

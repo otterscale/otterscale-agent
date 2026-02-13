@@ -19,11 +19,15 @@ import (
 	"github.com/otterscale/otterscale-agent/internal/app"
 )
 
+// Handler is responsible for mounting all gRPC service handlers,
+// interceptors, and operational endpoints (health, reflection,
+// metrics) onto an HTTP mux.
 type Handler struct {
 	fleet    *app.FleetService
 	resource *app.ResourceService
 }
 
+// NewHandler returns a Handler for the given gRPC services.
 func NewHandler(fleet *app.FleetService, resource *app.ResourceService) *Handler {
 	return &Handler{
 		fleet:    fleet,
@@ -31,9 +35,10 @@ func NewHandler(fleet *app.FleetService, resource *app.ResourceService) *Handler
 	}
 }
 
-// Mount registers all handlers, middlewares, and observability tools to the mux.
+// Mount registers all gRPC service handlers, OTel interceptors, and
+// operational endpoints onto the provided mux.
 func (h *Handler) Mount(mux *http.ServeMux) error {
-	// Prepare Interceptors
+	// OpenTelemetry interceptor for automatic tracing and metrics.
 	otelInterceptor, err := otelconnect.NewInterceptor()
 	if err != nil {
 		return err
@@ -43,7 +48,7 @@ func (h *Handler) Mount(mux *http.ServeMux) error {
 		otelInterceptor,
 	)
 
-	// Register Observability & Operations (Reflection, Health, Metrics)
+	// Operational endpoints: gRPC reflection, health checks, Prometheus.
 	services := []string{
 		fleetv1.FleetServiceName,
 		resourcev1.ResourceServiceName,
@@ -53,29 +58,27 @@ func (h *Handler) Mount(mux *http.ServeMux) error {
 		return err
 	}
 
-	// Register Service Handlers
+	// Application service handlers.
 	mux.Handle(fleetv1.NewFleetServiceHandler(h.fleet, interceptors))
 	mux.Handle(resourcev1.NewResourceServiceHandler(h.resource, interceptors))
 
-	// Register Pending Implementations (TODOs)
+	// Placeholder registrations for future features.
 	h.registerProxy(mux)
 	h.registerWebSocket(mux)
 
 	return nil
 }
 
-// registerOpsHandlers sets up Reflection, Health Check, and Metrics.
+// registerOpsHandlers sets up gRPC reflection, health checks, and
+// Prometheus metrics scraping.
 func (h *Handler) registerOpsHandlers(mux *http.ServeMux, serviceNames []string) error {
-	// gRPC Reflection
 	reflector := grpcreflect.NewStaticReflector(serviceNames...)
 	mux.Handle(grpcreflect.NewHandlerV1(reflector))
 	mux.Handle(grpcreflect.NewHandlerV1Alpha(reflector))
 
-	// gRPC Health Check
 	checker := grpchealth.NewStaticChecker(serviceNames...)
 	mux.Handle(grpchealth.NewHandler(checker))
 
-	// Prometheus Metrics
 	exporter, err := prometheus.New()
 	if err != nil {
 		return err
@@ -86,17 +89,9 @@ func (h *Handler) registerOpsHandlers(mux *http.ServeMux, serviceNames []string)
 	return nil
 }
 
-// TODO: Implement Prometheus proxy
-func (h *Handler) registerProxy(mux *http.ServeMux) {
-	// proxy := httputil.NewSingleHostReverseProxy(h.environment.GetPrometheusURL())
-	// proxy.ModifyResponse = func(resp *http.Response) error {
-	// 	resp.Header.Del("Access-Control-Allow-Origin")
-	// 	return nil
-	// }
-	// mux.Handle("/prometheus/", http.StripPrefix("/prometheus", proxy))
-}
+// registerProxy is a placeholder for a future Prometheus reverse proxy.
+func (h *Handler) registerProxy(mux *http.ServeMux) {}
 
-// TODO: Implement WebSocket handler
-func (h *Handler) registerWebSocket(mux *http.ServeMux) {
-	// mux.HandleFunc(h.instance.VNCPathPrefix(), h.instance.VNCHandler())
-}
+// registerWebSocket is a placeholder for a future WebSocket handler
+// (e.g. VNC).
+func (h *Handler) registerWebSocket(mux *http.ServeMux) {}

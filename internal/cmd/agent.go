@@ -9,8 +9,14 @@ import (
 	"github.com/otterscale/otterscale-agent/internal/config"
 )
 
+// AgentInjector is a Wire-generated factory that creates a fully
+// wired Agent together with a cleanup function.
 type AgentInjector func() (*agent.Agent, func(), error)
 
+// NewAgentCommand returns the "agent" Cobra subcommand. The injector
+// is called lazily inside RunE so that expensive initialisation
+// (loading kubeconfig, etc.) only happens when the command actually
+// executes.
 func NewAgentCommand(conf *config.Config, newAgent AgentInjector) (*cobra.Command, error) {
 	cmd := &cobra.Command{
 		Use:     "agent",

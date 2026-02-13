@@ -1,3 +1,5 @@
+// Package server implements the control-plane runtime that serves the
+// public gRPC/HTTP API and manages the chisel tunnel listener.
 package server
 
 import (
@@ -12,6 +14,7 @@ import (
 	"github.com/otterscale/otterscale-agent/internal/transport/tunnel"
 )
 
+// Config holds the runtime parameters for a Server.
 type Config struct {
 	Address          string
 	AllowedOrigins   []string
@@ -21,15 +24,22 @@ type Config struct {
 	KeycloakClientID string
 }
 
+// Server binds an HTTP server (gRPC + REST) and a chisel tunnel
+// listener, running them in parallel via transport.Serve.
 type Server struct {
 	handler *Handler
 	tunnel  core.TunnelProvider
 }
 
+// NewServer returns a Server wired to the given handler and tunnel
+// provider.
 func NewServer(handler *Handler, tunnel core.TunnelProvider) *Server {
 	return &Server{handler: handler, tunnel: tunnel}
 }
 
+// Run starts both the HTTP and tunnel servers. It blocks until ctx
+// is cancelled or an unrecoverable error occurs. Health, reflection,
+// and fleet-registration endpoints are marked as public (no auth).
 func (s *Server) Run(ctx context.Context, cfg Config) error {
 	oidc, err := middleware.NewOIDC(cfg.KeycloakRealmURL, cfg.KeycloakClientID)
 	if err != nil {

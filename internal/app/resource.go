@@ -22,12 +22,17 @@ import (
 	"github.com/otterscale/otterscale-agent/internal/core"
 )
 
+// ResourceService implements the Resource gRPC service. It proxies
+// Kubernetes CRUD and watch operations through the tunnel, translating
+// between protobuf and unstructured Kubernetes objects.
 type ResourceService struct {
 	pbconnect.UnimplementedResourceServiceHandler
 
 	resource *core.ResourceUseCase
 }
 
+// NewResourceService returns a ResourceService backed by the given
+// use-case.
 func NewResourceService(resource *core.ResourceUseCase) *ResourceService {
 	return &ResourceService{
 		resource: resource,
@@ -36,6 +41,8 @@ func NewResourceService(resource *core.ResourceUseCase) *ResourceService {
 
 var _ pbconnect.ResourceServiceHandler = (*ResourceService)(nil)
 
+// Discovery returns the full list of API resources available on the
+// target cluster.
 func (s *ResourceService) Discovery(ctx context.Context, req *pb.DiscoveryRequest) (*pb.DiscoveryResponse, error) {
 	apiResources, err := s.resource.ServerResources(ctx, req.GetCluster())
 	if err != nil {
@@ -52,14 +59,17 @@ func (s *ResourceService) Discovery(ctx context.Context, req *pb.DiscoveryReques
 	return resp, nil
 }
 
+// Schema returns the OpenAPI schema for the given GVK, serialised as
+// a protobuf Struct.
 func (s *ResourceService) Schema(ctx context.Context, req *pb.SchemaRequest) (*structpb.Struct, error) {
-	schema, err := s.resource.ResolveSchema(ctx, req.GetCluster(), req.GetGroup(), req.GetVersion(), req.GetKind())
+	resolved, err := s.resource.ResolveSchema(ctx, req.GetCluster(), req.GetGroup(), req.GetVersion(), req.GetKind())
 	if err != nil {
 		return nil, k8sErrorToConnectError(err)
 	}
-	return s.toProtoStructFromJSONSchema(schema)
+	return s.toProtoStructFromJSONSchema(resolved)
 }
 
+// List returns a paged list of resources matching the request filters.
 func (s *ResourceService) List(ctx context.Context, req *pb.ListRequest) (*pb.ListResponse, error) {
 	resources, err := s.resource.ListResources(ctx, req.GetCluster(), req.GetGroup(), req.GetVersion(), req.GetResource(), req.GetNamespace(), req.GetLabelSelector(), req.GetFieldSelector(), req.GetLimit(), req.GetContinue())
 	if err != nil {
@@ -79,6 +89,7 @@ func (s *ResourceService) List(ctx context.Context, req *pb.ListRequest) (*pb.Li
 	return resp, nil
 }
 
+// Get returns a single resource by name.
 func (s *ResourceService) Get(ctx context.Context, req *pb.GetRequest) (*pb.Resource, error) {
 	resource, err := s.resource.GetResource(ctx, req.GetCluster(), req.GetGroup(), req.GetVersion(), req.GetResource(), req.GetNamespace(), req.GetName())
 	if err != nil {
@@ -87,6 +98,7 @@ func (s *ResourceService) Get(ctx context.Context, req *pb.GetRequest) (*pb.Reso
 	return s.toProtoResource(resource.Object)
 }
 
+// Create creates a new resource from the YAML manifest in the request.
 func (s *ResourceService) Create(ctx context.Context, req *pb.CreateRequest) (*pb.Resource, error) {
 	resource, err := s.resource.CreateResource(ctx, req.GetCluster(), req.GetGroup(), req.GetVersion(), req.GetResource(), req.GetNamespace(), req.GetManifest())
 	if err != nil {
@@ -95,6 +107,7 @@ func (s *ResourceService) Create(ctx context.Context, req *pb.CreateRequest) (*p
 	return s.toProtoResource(resource.Object)
 }
 
+// Apply performs a server-side apply for the given resource.
 func (s *ResourceService) Apply(ctx context.Context, req *pb.ApplyRequest) (*pb.Resource, error) {
 	resource, err := s.resource.ApplyResource(ctx, req.GetCluster(), req.GetGroup(), req.GetVersion(), req.GetResource(), req.GetNamespace(), req.GetName(), req.GetManifest(), req.GetForce(), req.GetFieldManager())
 	if err != nil {
@@ -103,6 +116,8 @@ func (s *ResourceService) Apply(ctx context.Context, req *pb.ApplyRequest) (*pb.
 	return s.toProtoResource(resource.Object)
 }
 
+// Delete removes the named resource. An optional grace period may be
+// specified in the request.
 func (s *ResourceService) Delete(ctx context.Context, req *pb.DeleteRequest) (*emptypb.Empty, error) {
 	var gracePeriod *int64
 	if req.HasGracePeriodSeconds() {
@@ -115,6 +130,9 @@ func (s *ResourceService) Delete(ctx context.Context, req *pb.DeleteRequest) (*e
 	return &emptypb.Empty{}, nil
 }
 
+// Watch opens a server-streaming RPC that forwards Kubernetes watch
+// events to the client. The stream ends when the client cancels the
+// context or the upstream watcher closes.
 func (s *ResourceService) Watch(ctx context.Context, req *pb.WatchRequest, stream *connect.ServerStream[pb.WatchEvent]) error {
 	watcher, err := s.resource.WatchResource(ctx, req.GetCluster(), req.GetGroup(), req.GetVersion(), req.GetResource(), req.GetNamespace(), req.GetLabelSelector(), req.GetFieldSelector(), req.GetResourceVersion())
 	if err != nil {
@@ -144,6 +162,13 @@ func (s *ResourceService) Watch(ctx context.Context, req *pb.WatchRequest, strea
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
+
+// processEvent converts a single Kubernetes watch.Event into a
+// protobuf WatchEvent. Returns false if the event should be skipped
+// (e.g. unexpected type).
 func (s *ResourceService) processEvent(event watch.Event) (*pb.WatchEvent, bool) {
 	switch event.Type {
 	case watch.Added, watch.Modified, watch.Deleted:
@@ -187,6 +212,9 @@ func (s *ResourceService) processEvent(event watch.Event) (*pb.WatchEvent, bool)
 	}
 }
 
+// toProtoAPIResources flattens the Kubernetes APIResourceList slice
+// into a single []*pb.APIResource list, embedding the parsed
+// group/version into each entry.
 func (s *ResourceService) toProtoAPIResources(list []*metav1.APIResourceList) ([]*pb.APIResource, error) {
 	ret := []*pb.APIResource{}
 
@@ -204,6 +232,8 @@ func (s *ResourceService) toProtoAPIResources(list []*metav1.APIResourceList) ([
 	return ret, nil
 }
 
+// toProtoAPIResource converts a single Kubernetes APIResource into its
+// protobuf representation.
 func (s *ResourceService) toProtoAPIResource(gv schema.GroupVersion, r *metav1.APIResource) *pb.APIResource {
 	ret := &pb.APIResource{}
 	ret.SetGroup(gv.Group)
@@ -216,6 +246,9 @@ func (s *ResourceService) toProtoAPIResource(gv schema.GroupVersion, r *metav1.A
 	return ret
 }
 
+// toProtoStructFromJSONSchema serialises an OpenAPI spec.Schema to
+// JSON and re-parses it into a protobuf Struct so it can be returned
+// as a generic structured response.
 func (s *ResourceService) toProtoStructFromJSONSchema(js *spec.Schema) (*structpb.Struct, error) {
 	jsBytes, err := json.Marshal(js)
 	if err != nil {
@@ -230,6 +263,8 @@ func (s *ResourceService) toProtoStructFromJSONSchema(js *spec.Schema) (*structp
 	return ret, nil
 }
 
+// toProtoResources converts a slice of Unstructured objects into
+// protobuf Resource messages.
 func (s *ResourceService) toProtoResources(list []unstructured.Unstructured) ([]*pb.Resource, error) {
 	ret := []*pb.Resource{}
 
@@ -245,6 +280,8 @@ func (s *ResourceService) toProtoResources(list []unstructured.Unstructured) ([]
 	return ret, nil
 }
 
+// toProtoResource wraps a raw Kubernetes object map in a protobuf
+// Resource message.
 func (s *ResourceService) toProtoResource(obj map[string]any) (*pb.Resource, error) {
 	object, err := structpb.NewStruct(obj)
 	if err != nil {
@@ -256,28 +293,26 @@ func (s *ResourceService) toProtoResource(obj map[string]any) (*pb.Resource, err
 	return ret, nil
 }
 
+// toProtoWatchEventType maps a Kubernetes watch.EventType to the
+// protobuf WatchEvent_Type enum.
 func (s *ResourceService) toProtoWatchEventType(t watch.EventType) pb.WatchEvent_Type {
 	switch t {
 	case watch.Added:
 		return pb.WatchEvent_TYPE_ADDED
-
 	case watch.Modified:
 		return pb.WatchEvent_TYPE_MODIFIED
-
 	case watch.Deleted:
 		return pb.WatchEvent_TYPE_DELETED
-
 	case watch.Bookmark:
 		return pb.WatchEvent_TYPE_BOOKMARK
-
 	case watch.Error:
 		return pb.WatchEvent_TYPE_ERROR
-
 	default:
 		return pb.WatchEvent_TYPE_UNSPECIFIED
 	}
 }
 
+// deref returns the value pointed to by ptr, or def if ptr is nil.
 func deref[T any](ptr *T, def T) T {
 	if ptr != nil {
 		return *ptr

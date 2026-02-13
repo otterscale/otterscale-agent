@@ -8,7 +8,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// Map of Kubernetes status reasons to Connect codes.
+// statusReasonToConnectCode maps Kubernetes StatusReason values to
+// their closest ConnectRPC error code equivalents.
 var statusReasonToConnectCode = map[metav1.StatusReason]connect.Code{
 	metav1.StatusReasonUnauthorized:          connect.CodeUnauthenticated,
 	metav1.StatusReasonForbidden:             connect.CodePermissionDenied,
@@ -31,7 +32,10 @@ var statusReasonToConnectCode = map[metav1.StatusReason]connect.Code{
 	metav1.StatusReasonServiceUnavailable:    connect.CodeUnavailable,
 }
 
-// Convert a Kubernetes error to a Connect error.
+// k8sErrorToConnectError converts a Kubernetes API error into a
+// ConnectRPC error with a semantically equivalent code. If the error
+// does not carry an APIStatus or the reason is unmapped, it falls back
+// to connect.CodeInternal.
 func k8sErrorToConnectError(err error) error {
 	var apiStatus apierrors.APIStatus
 	if !errors.As(err, &apiStatus) {
