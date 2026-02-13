@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
@@ -12,6 +13,10 @@ type TunnelProvider interface {
 	Server() *chserver.Server
 	RegisterCluster(cluster, user, pass string) (string, error)
 	ResolveAddress(cluster string) (string, error)
+}
+
+type TunnelConsumer interface {
+	Register(ctx context.Context, serverURL, cluster string) (endpoint, fingerprint, auth string, err error)
 }
 
 type FleetUseCase struct {

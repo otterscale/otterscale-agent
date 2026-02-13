@@ -3,9 +3,6 @@ package server
 import (
 	"context"
 	"fmt"
-	"time"
-
-	"golang.org/x/sync/errgroup"
 
 	fleetv1 "github.com/otterscale/otterscale-agent/api/fleet/v1/pbconnect"
 	"github.com/otterscale/otterscale-agent/internal/core"
@@ -44,6 +41,9 @@ func (s *Server) Run(ctx context.Context, cfg Config) error {
 		http.WithAllowedOrigins(cfg.AllowedOrigins),
 		http.WithAuthMiddleware(oidc),
 		http.WithPublicPaths([]string{
+			"/grpc.health.v1.Health/Check",
+			"/grpc.health.v1.Health/Watch",
+			"/grpc.reflection.v1.ServerReflection/ServerReflectionInfo",
 			fleetv1.FleetServiceRegisterProcedure,
 		}),
 		http.WithMount(s.handler.Mount),
@@ -61,23 +61,5 @@ func (s *Server) Run(ctx context.Context, cfg Config) error {
 		return fmt.Errorf("failed to create tunnel server: %w", err)
 	}
 
-	srvs := []transport.Server{httpSrv, tunnelSrv}
-	eg, ctx := errgroup.WithContext(ctx)
-
-	for _, srv := range srvs {
-		eg.Go(func() error {
-			return srv.Start(ctx)
-		})
-
-		eg.Go(func() error {
-			<-ctx.Done()
-
-			stopCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-			defer cancel()
-
-			return srv.Stop(stopCtx)
-		})
-	}
-
-	return eg.Wait()
+	return transport.Serve(ctx, httpSrv, tunnelSrv)
 }

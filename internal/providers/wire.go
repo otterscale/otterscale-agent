@@ -5,6 +5,7 @@ import (
 
 	"github.com/otterscale/otterscale-agent/internal/providers/chisel"
 	"github.com/otterscale/otterscale-agent/internal/providers/kubernetes"
+	"github.com/otterscale/otterscale-agent/internal/providers/otterscale"
 )
 
 var ProviderSet = wire.NewSet(
@@ -12,4 +13,5 @@ var ProviderSet = wire.NewSet(
 	kubernetes.New,
 	kubernetes.NewDiscoveryClient,
 	kubernetes.NewResourceRepo,
+	otterscale.NewFleetRegistrar,
 )
