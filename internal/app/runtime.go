@@ -2,8 +2,10 @@ package app
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
+	"sync"
 	"time"
 
 	"connectrpc.com/connect"
@@ -80,7 +82,7 @@ func (s *RuntimeService) PodLog(ctx context.Context, req *pb.PodLogRequest, stre
 			}
 		}
 		if readErr != nil {
-			if readErr == io.EOF {
+			if errors.Is(readErr, io.EOF) {
 				return nil
 			}
 			return k8sErrorToConnectError(readErr)
@@ -121,10 +123,15 @@ func (s *RuntimeService) ExecuteTTY(ctx context.Context, req *pb.ExecuteTTYReque
 	}
 
 	// Merge stdout and stderr into a single output channel.
+	// A WaitGroup tracks the two reader goroutines so that the
+	// channel is closed once both finish, preventing goroutine leaks.
 	ch := make(chan execChunk, 8)
+	var readerWg sync.WaitGroup
+	readerWg.Add(2)
 
 	// Read stdout.
 	go func() {
+		defer readerWg.Done()
 		defer stdoutR.Close()
 		buf := make([]byte, streamChunkSize)
 		for {
@@ -140,6 +147,7 @@ func (s *RuntimeService) ExecuteTTY(ctx context.Context, req *pb.ExecuteTTYReque
 
 	// Read stderr (only meaningful when TTY is false).
 	go func() {
+		defer readerWg.Done()
 		defer stderrR.Close()
 		buf := make([]byte, streamChunkSize)
 		for {
@@ -151,6 +159,13 @@ func (s *RuntimeService) ExecuteTTY(ctx context.Context, req *pb.ExecuteTTYReque
 				return
 			}
 		}
+	}()
+
+	// Close the channel once both readers finish so that the
+	// select loop below can detect channel closure.
+	go func() {
+		readerWg.Wait()
+		close(ch)
 	}()
 
 	// Stream chunks to the client until the exec session ends.
@@ -272,7 +287,7 @@ func (s *RuntimeService) PortForward(ctx context.Context, req *pb.PortForwardReq
 			}
 		}
 		if readErr != nil {
-			if readErr == io.EOF {
+			if errors.Is(readErr, io.EOF) {
 				return nil
 			}
 			return k8sErrorToConnectError(readErr)

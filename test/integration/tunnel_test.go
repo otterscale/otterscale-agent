@@ -14,7 +14,7 @@ import (
 )
 
 func TestFleetRegisterClusterUsesSingleSharedTunnelPort(t *testing.T) {
-	tunnel := chisel.NewService()
+	tunnel := newTestTunnel(t)
 	initTunnelServer(t, tunnel)
 	fleet := core.NewFleetUseCase(tunnel, "test")
 
@@ -59,7 +59,7 @@ func TestFleetRegisterClusterUsesSingleSharedTunnelPort(t *testing.T) {
 }
 
 func TestFleetRegisterClusterLatestAgentWinsForSameCluster(t *testing.T) {
-	tunnel := chisel.NewService()
+	tunnel := newTestTunnel(t)
 	initTunnelServer(t, tunnel)
 	fleet := core.NewFleetUseCase(tunnel, "test")
 
@@ -93,7 +93,7 @@ func TestFleetRegisterClusterLatestAgentWinsForSameCluster(t *testing.T) {
 }
 
 func TestFleetRegisterClusterReregisterAndReplaceAcrossAgents(t *testing.T) {
-	tunnel := chisel.NewService()
+	tunnel := newTestTunnel(t)
 	initTunnelServer(t, tunnel)
 	fleet := core.NewFleetUseCase(tunnel, "test")
 
@@ -150,16 +150,19 @@ func TestFleetRegisterClusterReregisterAndReplaceAcrossAgents(t *testing.T) {
 	}
 }
 
-func initTunnelServer(t *testing.T, tunnel *chisel.Service) {
+// newTestTunnel creates a chisel.Service with a deterministic test CA
+// injected at construction time.
+func newTestTunnel(t *testing.T) *chisel.Service {
 	t.Helper()
-
-	// Initialize a CA for the tunnel provider so that CSR signing
-	// works during tests.
 	ca, err := pki.NewCAFromSeed("test-ca-seed")
 	if err != nil {
 		t.Fatalf("create CA: %v", err)
 	}
-	tunnel.SetCA(ca)
+	return chisel.NewService(ca)
+}
+
+func initTunnelServer(t *testing.T, tunnel *chisel.Service) {
+	t.Helper()
 
 	srv, err := tunneltransport.NewServer(
 		tunneltransport.WithServer(tunnel.ServerRef()),

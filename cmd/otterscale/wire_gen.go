@@ -37,8 +37,14 @@ func wireCmd() (*cobra.Command, func(), error) {
 // wireServer assembles a fully wired Server with all gRPC services,
 // use-cases, and infrastructure providers. The version parameter is
 // provided by the caller and flows through Wire to FleetUseCase.
-func wireServer(v core.Version) (*server.Server, func(), error) {
-	service := chisel.NewService()
+// The config parameter provides the CA seed for mTLS certificate
+// issuance via provideCA.
+func wireServer(v core.Version, conf *config.Config) (*server.Server, func(), error) {
+	ca, err := provideCA(conf)
+	if err != nil {
+		return nil, nil, err
+	}
+	service := chisel.NewService(ca)
 	fleetUseCase := core.NewFleetUseCase(service, v)
 	fleetService := app.NewFleetService(fleetUseCase)
 	kubernetesKubernetes := kubernetes.New(service)

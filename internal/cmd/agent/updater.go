@@ -34,22 +34,16 @@ const inClusterNamespacePath = "/var/run/secrets/kubernetes.io/serviceaccount/na
 // updater performs in-cluster Deployment image patches so the agent
 // can self-update to match the server version.
 type updater struct {
-	namespace      string
-	deploymentName string
-	containerName  string
-	log            *slog.Logger
+	client kubernetes.Interface // cached clientset
+	log    *slog.Logger
 }
 
 // newUpdater returns an updater configured with the Deployment
-// coordinates. It returns nil if deploymentName is empty (self-update
-// disabled). If namespace is empty it is auto-detected from the
-// in-cluster service account.
+// coordinates. Values are read from environment variables with
+// sensible defaults.
 func newUpdater() *updater {
 	return &updater{
-		namespace:      detectNamespace(),
-		deploymentName: deploymentName,
-		containerName:  containerName,
-		log:            slog.Default().With("component", "updater"),
+		log: slog.Default().With("component", "updater"),
 	}
 }
 
@@ -86,7 +80,7 @@ type containerImagePatch struct {
 // given version using a strategic merge patch. This preserves all
 // other Deployment configuration (resources, env, volumes, etc.).
 func (u *updater) patch(ctx context.Context, version string) error {
-	client, err := u.kubeClient()
+	client, err := u.getOrCreateClient()
 	if err != nil {
 		return fmt.Errorf("create kube client: %w", err)
 	}
@@ -99,7 +93,7 @@ func (u *updater) patch(ctx context.Context, version string) error {
 				Spec: podSpecPatch{
 					Containers: []containerImagePatch{
 						{
-							Name:  u.containerName,
+							Name:  containerName,
 							Image: image,
 						},
 					},
@@ -113,15 +107,17 @@ func (u *updater) patch(ctx context.Context, version string) error {
 		return fmt.Errorf("marshal patch: %w", err)
 	}
 
+	namespace := detectNamespace()
+
 	u.log.Info("patching agent deployment",
-		"deployment", u.deploymentName,
-		"namespace", u.namespace,
+		"deployment", deploymentName,
+		"namespace", namespace,
 		"image", image,
 	)
 
-	_, err = client.AppsV1().Deployments(u.namespace).Patch(
+	_, err = client.AppsV1().Deployments(namespace).Patch(
 		ctx,
-		u.deploymentName,
+		deploymentName,
 		types.StrategicMergePatchType,
 		data,
 		metav1.PatchOptions{},
@@ -134,9 +130,14 @@ func (u *updater) patch(ctx context.Context, version string) error {
 	return nil
 }
 
-// kubeClient creates a Kubernetes clientset using the in-cluster
-// config, falling back to KUBECONFIG.
-func (u *updater) kubeClient() (kubernetes.Interface, error) {
+// getOrCreateClient returns the cached Kubernetes clientset, creating
+// it on first use. The clientset is reused across patch calls to avoid
+// redundant connection setup.
+func (u *updater) getOrCreateClient() (kubernetes.Interface, error) {
+	if u.client != nil {
+		return u.client, nil
+	}
+
 	cfg, err := rest.InClusterConfig()
 	if err != nil {
 		cfg, err = clientcmd.BuildConfigFromFlags("", clientcmd.RecommendedHomeFile)
@@ -144,7 +145,13 @@ func (u *updater) kubeClient() (kubernetes.Interface, error) {
 			return nil, fmt.Errorf("load kube config: %w", err)
 		}
 	}
-	return kubernetes.NewForConfig(cfg)
+
+	client, err := kubernetes.NewForConfig(cfg)
+	if err != nil {
+		return nil, err
+	}
+	u.client = client
+	return client, nil
 }
 
 // detectNamespace reads the pod namespace from the standard in-cluster

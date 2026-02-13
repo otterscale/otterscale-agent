@@ -4,7 +4,6 @@ package server
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -13,23 +12,17 @@ import (
 
 	fleetv1 "github.com/otterscale/otterscale-agent/api/fleet/v1/pbconnect"
 	"github.com/otterscale/otterscale-agent/internal/middleware"
-	"github.com/otterscale/otterscale-agent/internal/pki"
 	"github.com/otterscale/otterscale-agent/internal/providers/chisel"
 	"github.com/otterscale/otterscale-agent/internal/transport"
 	"github.com/otterscale/otterscale-agent/internal/transport/http"
 	"github.com/otterscale/otterscale-agent/internal/transport/tunnel"
 )
 
-// defaultCASeed is the insecure placeholder that ships in config
-// defaults. The server refuses to start if it is still in use.
-const defaultCASeed = "change-me"
-
 // Config holds the runtime parameters for a Server.
 type Config struct {
 	Address          string
 	AllowedOrigins   []string
 	TunnelAddress    string
-	TunnelCASeed     string
 	KeycloakRealmURL string
 	KeycloakClientID string
 }
@@ -44,7 +37,7 @@ type Server struct {
 // NewServer returns a Server wired to the given handler and tunnel
 // provider. It accepts the concrete *chisel.Service rather than the
 // core.TunnelProvider interface because it needs direct access to the
-// underlying chisel server for transport initialisation.
+// underlying chisel server and CA for transport initialisation.
 func NewServer(handler *Handler, tunnel *chisel.Service) *Server {
 	return &Server{handler: handler, tunnel: tunnel}
 }
@@ -53,17 +46,7 @@ func NewServer(handler *Handler, tunnel *chisel.Service) *Server {
 // is cancelled or an unrecoverable error occurs. Health, reflection,
 // and fleet-registration endpoints are marked as public (no auth).
 func (s *Server) Run(ctx context.Context, cfg Config) error {
-	if cfg.TunnelCASeed == defaultCASeed {
-		return errors.New("refusing to start: tunnel CA seed is the insecure default \"change-me\"; " +
-			"set --tunnel-ca-seed or OTTERSCALE_SERVER_TUNNEL_CA_SEED to a unique secret")
-	}
-
-	// Initialize CA from seed and inject into the tunnel provider.
-	ca, err := pki.NewCAFromSeed(cfg.TunnelCASeed)
-	if err != nil {
-		return fmt.Errorf("failed to create CA: %w", err)
-	}
-	s.tunnel.SetCA(ca)
+	ca := s.tunnel.CA()
 
 	// Generate a server TLS certificate signed by the CA. Parse the
 	// tunnel address to extract the host for the certificate SAN.
@@ -133,7 +116,9 @@ func (s *Server) Run(ctx context.Context, cfg Config) error {
 	}
 
 	// Detect disconnected tunnel clients and remove stale registrations.
-	go s.tunnel.RunHealthCheck(ctx)
+	// The health checker runs as a managed listener so that panics are
+	// caught and shutdown is coordinated with the other servers.
+	healthChecker := chisel.NewHealthCheckListener(s.tunnel)
 
-	return transport.Serve(ctx, httpSrv, tunnelSrv)
+	return transport.Serve(ctx, httpSrv, tunnelSrv, healthChecker)
 }

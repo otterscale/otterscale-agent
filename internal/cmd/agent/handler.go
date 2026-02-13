@@ -26,7 +26,7 @@ func NewHandler() *Handler {
 // the Host header so that the upstream kube-apiserver recognises
 // the request.
 func (h *Handler) Mount(mux *http.ServeMux) error {
-	config, err := h.newKubeConfig()
+	config, err := newKubeConfig()
 	if err != nil {
 		return fmt.Errorf("failed to load in-cluster config: %w", err)
 	}
@@ -59,7 +59,7 @@ func (r *errorResponder) Error(w http.ResponseWriter, _ *http.Request, err error
 // attempts the in-cluster config (service account token); if that
 // fails (e.g. running outside a pod) it falls back to the KUBECONFIG
 // environment variable.
-func (h *Handler) newKubeConfig() (*rest.Config, error) {
+func newKubeConfig() (*rest.Config, error) {
 	cfg, err := rest.InClusterConfig()
 	if err == nil {
 		return cfg, nil

@@ -6,6 +6,8 @@ import (
 	"connectrpc.com/connect"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/otterscale/otterscale-agent/internal/core"
 )
 
 // statusReasonToConnectCode maps Kubernetes StatusReason values to
@@ -32,11 +34,23 @@ var statusReasonToConnectCode = map[metav1.StatusReason]connect.Code{
 	metav1.StatusReasonServiceUnavailable:    connect.CodeUnavailable,
 }
 
-// k8sErrorToConnectError converts a Kubernetes API error into a
-// ConnectRPC error with a semantically equivalent code. If the error
-// does not carry an APIStatus or the reason is unmapped, it falls back
-// to connect.CodeInternal.
+// k8sErrorToConnectError converts a Kubernetes API error or a domain
+// error into a ConnectRPC error with a semantically equivalent code.
+// Domain errors (ErrClusterNotFound, ErrNotReady) are checked first,
+// then Kubernetes APIStatus errors. Unrecognised errors fall back to
+// connect.CodeInternal.
 func k8sErrorToConnectError(err error) error {
+	// Domain error mapping.
+	var clusterNotFound *core.ErrClusterNotFound
+	if errors.As(err, &clusterNotFound) {
+		return connect.NewError(connect.CodeNotFound, err)
+	}
+	var notReady *core.ErrNotReady
+	if errors.As(err, &notReady) {
+		return connect.NewError(connect.CodeUnavailable, err)
+	}
+
+	// Kubernetes API error mapping.
 	var apiStatus apierrors.APIStatus
 	if !errors.As(err, &apiStatus) {
 		return connect.NewError(connect.CodeInternal, err)

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	pb "github.com/otterscale/otterscale-agent/api/fleet/v1"
@@ -16,36 +17,27 @@ import (
 	"github.com/otterscale/otterscale-agent/internal/pki"
 )
 
-// fleetRegistrar implements core.TunnelConsumer by generating a CSR,
-// calling the remote fleet service to have it signed, and returning
-// the resulting mTLS materials.
+// fleetRegistrar implements core.TunnelConsumer by generating a fresh
+// CSR on every registration, calling the remote fleet service to have
+// it signed, and returning the resulting mTLS materials.
 type fleetRegistrar struct {
 	agentID      string
 	agentVersion string // agent binary version, sent during registration
 	client       *http.Client
-	csrPEM       []byte
-	privateKey   []byte // PEM-encoded ECDSA private key
+
+	mu         sync.Mutex
+	privateKey []byte // PEM-encoded ECDSA private key from the latest registration
 }
 
 // NewFleetRegistrar returns a TunnelConsumer that registers agents
 // against the otterscale fleet API using CSR-based mTLS enrolment.
-// A fresh ECDSA P-256 key pair and CSR are generated at construction
-// time and reused across registrations. version is the agent binary
-// version injected via DI.
+// A fresh ECDSA P-256 key pair and CSR are generated on every
+// Register call to ensure forward secrecy — a compromised key from a
+// previous session cannot decrypt traffic from a new session.
 func NewFleetRegistrar(version core.Version) (core.TunnelConsumer, error) {
 	agentID, err := os.Hostname()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get hostname: %w", err)
-	}
-
-	key, keyPEM, err := pki.GenerateKey()
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate key pair: %w", err)
-	}
-
-	csrPEM, err := pki.GenerateCSR(key, agentID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate CSR: %w", err)
 	}
 
 	return &fleetRegistrar{
@@ -54,29 +46,44 @@ func NewFleetRegistrar(version core.Version) (core.TunnelConsumer, error) {
 		client: &http.Client{
 			Timeout: 30 * time.Second,
 		},
-		csrPEM:     csrPEM,
-		privateKey: keyPEM,
 	}, nil
 }
 
 var _ core.TunnelConsumer = (*fleetRegistrar)(nil)
 
-// Register calls the fleet service's Register RPC with the agent's
-// CSR and version. The server signs the CSR with its internal CA and
-// returns the signed certificate, CA certificate, tunnel endpoint,
-// and the server's own version.
+// Register generates a fresh ECDSA key pair and CSR, then calls the
+// fleet service's Register RPC. The server signs the CSR with its
+// internal CA and returns the signed certificate, CA certificate,
+// tunnel endpoint, and the server's own version. A new key pair is
+// generated on every call to provide forward secrecy.
 func (f *fleetRegistrar) Register(ctx context.Context, serverURL, cluster string) (core.Registration, error) {
+	key, keyPEM, err := pki.GenerateKey()
+	if err != nil {
+		return core.Registration{}, fmt.Errorf("generate key pair: %w", err)
+	}
+
+	csrPEM, err := pki.GenerateCSR(key, f.agentID)
+	if err != nil {
+		return core.Registration{}, fmt.Errorf("generate CSR: %w", err)
+	}
+
 	client := pbconnect.NewFleetServiceClient(f.client, serverURL)
 	req := &pb.RegisterRequest{}
 	req.SetCluster(cluster)
 	req.SetAgentId(f.agentID)
-	req.SetCsr(f.csrPEM)
+	req.SetCsr(csrPEM)
 	req.SetAgentVersion(f.agentVersion)
 
 	resp, err := client.Register(ctx, req)
 	if err != nil {
 		return core.Registration{}, err
 	}
+
+	// Store the private key so that PrivateKeyPEM returns the key
+	// that matches the certificate from this registration.
+	f.mu.Lock()
+	f.privateKey = keyPEM
+	f.mu.Unlock()
 
 	return core.Registration{
 		Endpoint:      resp.GetEndpoint(),
@@ -88,7 +95,9 @@ func (f *fleetRegistrar) Register(ctx context.Context, serverURL, cluster string
 }
 
 // PrivateKeyPEM returns the PEM-encoded private key that corresponds
-// to the CSR sent during registration.
+// to the CSR sent during the most recent registration.
 func (f *fleetRegistrar) PrivateKeyPEM() []byte {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	return f.privateKey
 }

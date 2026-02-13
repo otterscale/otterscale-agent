@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"maps"
 	"regexp"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -35,7 +36,7 @@ const maxHosts = 254 * 254 * 254
 // underlying chisel server via ServerRef() for transport-layer init.
 type Service struct {
 	server atomic.Pointer[chserver.Server]
-	ca     atomic.Pointer[pki.CA]
+	ca     *pki.CA
 	log    *slog.Logger
 
 	mu        sync.RWMutex
@@ -43,11 +44,14 @@ type Service struct {
 	usedHosts map[string]struct{}     // set of allocated hosts
 }
 
-// NewService returns a new Service backed by chisel.
+// NewService returns a new Service backed by chisel. The CA is
+// required for signing agent CSRs and must be provided at
+// construction time (dependency injection).
 // The underlying chisel server is lazily initialized by the tunnel
 // transport layer; see tunnel.NewServer.
-func NewService() *Service {
+func NewService(ca *pki.CA) *Service {
 	return &Service{
+		ca:        ca,
 		log:       slog.Default().With("component", "tunnel-provider"),
 		clusters:  make(map[string]core.Cluster),
 		usedHosts: make(map[string]struct{}),
@@ -65,21 +69,16 @@ func (s *Service) ServerRef() *atomic.Pointer[chserver.Server] {
 	return &s.server
 }
 
-// SetCA injects the CA used to sign agent CSRs and to report the CA
-// certificate. This is called during server startup, before any
-// registrations occur.
-func (s *Service) SetCA(ca *pki.CA) {
-	s.ca.Store(ca)
+// CA returns the CA used to sign agent CSRs and generate server
+// certificates. This is provided at construction time via DI.
+func (s *Service) CA() *pki.CA {
+	return s.ca
 }
 
 // CACertPEM returns the PEM-encoded CA certificate so that agents
 // can verify the tunnel server's identity via mTLS.
 func (s *Service) CACertPEM() []byte {
-	ca := s.ca.Load()
-	if ca == nil {
-		return nil
-	}
-	return ca.CertPEM()
+	return s.ca.CertPEM()
 }
 
 // ListClusters returns the names of all currently registered clusters.
@@ -99,13 +98,8 @@ func (s *Service) ListClusters() map[string]core.Cluster {
 // is released first so that re-registration always moves the cluster
 // to a fresh address.
 func (s *Service) RegisterCluster(cluster, agentID, agentVersion string, csrPEM []byte) (string, []byte, error) {
-	ca := s.ca.Load()
-	if ca == nil {
-		return "", nil, fmt.Errorf("CA not initialized")
-	}
-
 	// Sign the agent's CSR with the internal CA.
-	certPEM, err := ca.SignCSR(csrPEM)
+	certPEM, err := s.ca.SignCSR(csrPEM)
 	if err != nil {
 		return "", nil, fmt.Errorf("sign CSR: %w", err)
 	}
@@ -119,6 +113,9 @@ func (s *Service) RegisterCluster(cluster, agentID, agentVersion string, csrPEM 
 	_, pass, _ := parseAuth(auth)
 
 	srv := s.server.Load()
+	if srv == nil {
+		return "", nil, &core.ErrNotReady{Subsystem: "chisel server"}
+	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -159,6 +156,9 @@ func (s *Service) RegisterCluster(cluster, agentID, agentVersion string, csrPEM 
 // the cluster is not currently registered.
 func (s *Service) DeregisterCluster(cluster string) {
 	srv := s.server.Load()
+	if srv == nil {
+		return
+	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -180,7 +180,7 @@ func (s *Service) ResolveAddress(cluster string) (string, error) {
 
 	entry, ok := s.clusters[cluster]
 	if !ok {
-		return "", fmt.Errorf("cluster %s not registered", cluster)
+		return "", &core.ErrClusterNotFound{Cluster: cluster}
 	}
 
 	return fmt.Sprintf("http://%s:%d", entry.Host, tunnelPort), nil
@@ -230,10 +230,5 @@ func hostFromIndex(idx uint32) string {
 
 // parseAuth splits a "user:pass" string into its components.
 func parseAuth(auth string) (user, pass string, ok bool) {
-	for i := range auth {
-		if auth[i] == ':' {
-			return auth[:i], auth[i+1:], true
-		}
-	}
-	return auth, "", false
+	return strings.Cut(auth, ":")
 }

@@ -21,6 +21,32 @@ const (
 	healthFailThreshold = 3
 )
 
+// HealthCheckListener wraps the Service's health check loop as a
+// transport.Listener so that it participates in the same errgroup
+// lifecycle as the HTTP and tunnel servers. This ensures panics are
+// caught and graceful shutdown is coordinated.
+type HealthCheckListener struct {
+	service *Service
+}
+
+// NewHealthCheckListener returns a listener that runs periodic health
+// checks against registered tunnel endpoints.
+func NewHealthCheckListener(service *Service) *HealthCheckListener {
+	return &HealthCheckListener{service: service}
+}
+
+// Start runs the health check loop, blocking until ctx is cancelled.
+func (h *HealthCheckListener) Start(ctx context.Context) error {
+	h.service.runHealthCheck(ctx)
+	return nil
+}
+
+// Stop is a no-op; the health check loop exits when its context is
+// cancelled.
+func (h *HealthCheckListener) Stop(_ context.Context) error {
+	return nil
+}
+
 // clusterSnapshot returns a copy of the cluster-to-host mapping so
 // that health checks can iterate without holding the lock.
 func (s *Service) clusterSnapshot() map[string]string {
@@ -34,15 +60,16 @@ func (s *Service) clusterSnapshot() map[string]string {
 	return snapshot
 }
 
-// RunHealthCheck periodically probes every registered cluster's
+// runHealthCheck periodically probes every registered cluster's
 // tunnel endpoint via TCP dial. Clusters that fail healthFailThreshold
 // consecutive probes are automatically deregistered.
 //
 // The method blocks until ctx is cancelled.
-func (s *Service) RunHealthCheck(ctx context.Context) {
+func (s *Service) runHealthCheck(ctx context.Context) {
 	ticker := time.NewTicker(healthCheckInterval)
 	defer ticker.Stop()
 
+	dialer := net.Dialer{Timeout: healthDialTimeout}
 	failCounts := make(map[string]int)
 
 	for {
@@ -50,7 +77,7 @@ func (s *Service) RunHealthCheck(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			s.checkClusters(failCounts)
+			s.checkClusters(ctx, dialer, failCounts)
 		}
 	}
 }
@@ -58,7 +85,7 @@ func (s *Service) RunHealthCheck(ctx context.Context) {
 // checkClusters performs a single round of health checks across all
 // registered clusters. failCounts is mutated in place to track
 // consecutive failures per cluster.
-func (s *Service) checkClusters(failCounts map[string]int) {
+func (s *Service) checkClusters(ctx context.Context, dialer net.Dialer, failCounts map[string]int) {
 	snapshot := s.clusterSnapshot()
 
 	// Clean up failCounts for clusters that are no longer registered.
@@ -70,7 +97,7 @@ func (s *Service) checkClusters(failCounts map[string]int) {
 
 	for cluster, host := range snapshot {
 		addr := net.JoinHostPort(host, strconv.Itoa(tunnelPort))
-		conn, err := net.DialTimeout("tcp", addr, healthDialTimeout)
+		conn, err := dialer.DialContext(ctx, "tcp", addr)
 		if err == nil {
 			_ = conn.Close()
 			if failCounts[cluster] > 0 {
@@ -78,6 +105,11 @@ func (s *Service) checkClusters(failCounts map[string]int) {
 			}
 			delete(failCounts, cluster)
 			continue
+		}
+
+		// Don't count context cancellation as a probe failure.
+		if ctx.Err() != nil {
+			return
 		}
 
 		failCounts[cluster]++

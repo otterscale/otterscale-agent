@@ -81,6 +81,7 @@ type PortForwardOptions struct {
 // buffered channel. Resize events are enqueued via Set and dequeued by
 // the remotecommand executor via Next.
 type TerminalSizeQueue struct {
+	mu sync.Mutex
 	ch chan remotecommand.TerminalSize
 }
 
@@ -101,8 +102,12 @@ func (q *TerminalSizeQueue) Next() *remotecommand.TerminalSize {
 }
 
 // Set enqueues a resize event. If the queue is full, the oldest event
-// is dropped to make room.
+// is dropped to make room. A mutex prevents concurrent callers from
+// racing on the drain-then-push sequence.
 func (q *TerminalSizeQueue) Set(width, height uint16) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
 	select {
 	case q.ch <- remotecommand.TerminalSize{Width: width, Height: height}:
 	default:

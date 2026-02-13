@@ -155,7 +155,7 @@ func (ca *CA) GenerateServerCert(hosts ...string) (certPEM, keyPEM []byte, err e
 			CommonName:   "otterscale-tunnel",
 		},
 		NotBefore:   now.Add(-5 * time.Minute),
-		NotAfter:    now.Add(10 * 365 * 24 * time.Hour),
+		NotAfter:    now.Add(365 * 24 * time.Hour), // 1 year; regenerated on every server start
 		KeyUsage:    x509.KeyUsageDigitalSignature,
 		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 	}

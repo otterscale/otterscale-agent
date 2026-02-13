@@ -10,6 +10,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -22,6 +23,7 @@ import (
 	"github.com/otterscale/otterscale-agent/internal/cmd/server"
 	"github.com/otterscale/otterscale-agent/internal/config"
 	"github.com/otterscale/otterscale-agent/internal/core"
+	"github.com/otterscale/otterscale-agent/internal/pki"
 )
 
 // version is injected at build time via -ldflags
@@ -68,7 +70,7 @@ func newCmd(conf *config.Config) (*cobra.Command, error) {
 	v := core.Version(version)
 
 	serverCmd, err := cmd.NewServerCommand(conf, func() (*server.Server, func(), error) {
-		return wireServer(v)
+		return wireServer(v, conf)
 	})
 	if err != nil {
 		return nil, err
@@ -84,4 +86,17 @@ func newCmd(conf *config.Config) (*cobra.Command, error) {
 	c.AddCommand(serverCmd, agentCmd)
 
 	return c, nil
+}
+
+// provideCA is a Wire provider that creates a deterministic CA from
+// the configured seed. It validates that the seed is not the insecure
+// default, failing fast at dependency injection time rather than at
+// runtime.
+func provideCA(conf *config.Config) (*pki.CA, error) {
+	seed := conf.ServerTunnelCASeed()
+	if seed == "change-me" {
+		return nil, errors.New("refusing to start: tunnel CA seed is the insecure default \"change-me\"; " +
+			"set --tunnel-ca-seed or OTTERSCALE_SERVER_TUNNEL_CA_SEED to a unique secret")
+	}
+	return pki.NewCAFromSeed(seed)
 }
