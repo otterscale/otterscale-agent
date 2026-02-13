@@ -51,29 +51,30 @@ func NewServer(opts ...ServerOption) (*Server, error) {
 	for _, opt := range opts {
 		opt(srv)
 	}
-
-	cfg := &chserver.Config{
-		Reverse: true,
-		KeySeed: srv.keySeed,
-	}
-
-	chServer, err := chserver.NewServer(cfg)
-	if err != nil {
-		return nil, err
-	}
-
-	// if no users exist, chisel will allow anyone to connect.
-	disabledUser, disabledPass := uuid.NewString(), uuid.NewString()
-	if err := chServer.AddUser(disabledUser, disabledPass, "127.0.0.1"); err != nil {
-		return nil, err
-	}
-
-	*srv.Server = *chServer // replace the lazy initialized server
 	return srv, nil
 }
 
 // Start starts the tunnel server and blocks until the context is canceled.
 func (s *Server) Start(ctx context.Context) error {
+	cfg := &chserver.Config{
+		Reverse: true,
+		KeySeed: s.keySeed,
+	}
+
+	chServer, err := chserver.NewServer(cfg)
+	if err != nil {
+		return err
+	}
+
+	// if no users exist, chisel will allow anyone to connect.
+	disabledUser, disabledPass := uuid.NewString(), uuid.NewString()
+	if err := chServer.AddUser(disabledUser, disabledPass, "127.0.0.1"); err != nil {
+		return err
+	}
+
+	// replace the lazy initialized server
+	*s.Server = *chServer
+
 	host, port, err := net.SplitHostPort(s.address)
 	if err != nil {
 		return err
@@ -90,6 +91,9 @@ func (s *Server) Start(ctx context.Context) error {
 
 // Stop stops the tunnel server gracefully.
 func (s *Server) Stop(ctx context.Context) error {
+	if s.Server == nil {
+		return nil
+	}
 	slog.Info("Gracefully shutting down tunnel server...")
 	return s.Close()
 }
