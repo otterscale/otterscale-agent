@@ -110,7 +110,10 @@ func (s *Service) RegisterCluster(cluster, agentID, agentVersion string, csrPEM 
 	if err != nil {
 		return "", nil, fmt.Errorf("derive auth: %w", err)
 	}
-	_, pass, _ := parseAuth(auth)
+	_, pass, ok := parseAuth(auth)
+	if !ok {
+		return "", nil, fmt.Errorf("invalid auth format: expected user:pass, got %q", auth)
+	}
 
 	srv := s.server.Load()
 	if srv == nil {

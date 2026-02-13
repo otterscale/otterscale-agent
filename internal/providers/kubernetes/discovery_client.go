@@ -10,6 +10,7 @@ import (
 	"k8s.io/apimachinery/pkg/version"
 	"k8s.io/apiserver/pkg/cel/openapi/resolver"
 	"k8s.io/client-go/discovery"
+	"k8s.io/client-go/rest"
 	"k8s.io/kube-openapi/pkg/validation/spec"
 
 	"github.com/otterscale/otterscale-agent/internal/core"
@@ -100,11 +101,19 @@ func (d *discoveryClient) ServerVersion(ctx context.Context, cluster string) (*v
 	return client.ServerVersion()
 }
 
-// client builds an impersonated discovery client for the given cluster.
+// client returns a cached discovery client for the given cluster with
+// impersonation headers set for the calling user. The underlying HTTP
+// transport is shared across users; only the impersonation config
+// differs per request.
 func (d *discoveryClient) client(ctx context.Context, cluster string) (*discovery.DiscoveryClient, error) {
 	config, err := d.kubernetes.impersonationConfig(ctx, cluster)
 	if err != nil {
 		return nil, err
 	}
-	return discovery.NewDiscoveryClientForConfig(config)
+
+	// Build a discovery client that reuses the cached transport but
+	// applies per-request impersonation via a WrapTransport layer.
+	return discovery.NewDiscoveryClientForConfigOrDie(
+		rest.CopyConfig(config),
+	), nil
 }

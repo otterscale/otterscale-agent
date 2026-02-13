@@ -29,11 +29,11 @@ type TunnelProvider interface {
 // the fleet server and obtaining tunnel credentials via CSR/mTLS.
 type TunnelConsumer interface {
 	// Register calls the fleet API with a CSR and returns the
-	// signed certificate, CA certificate, and tunnel endpoint.
+	// signed certificate, CA certificate, tunnel endpoint, and the
+	// private key that corresponds to the CSR. Returning the key
+	// alongside the certificate eliminates the TOCTOU race that
+	// would occur if callers had to fetch the key separately.
 	Register(ctx context.Context, serverURL, cluster string) (Registration, error)
-	// PrivateKeyPEM returns the PEM-encoded private key that
-	// corresponds to the CSR sent during registration.
-	PrivateKeyPEM() []byte
 }
 
 // Registration holds the credentials and connection details returned
@@ -47,6 +47,11 @@ type Registration struct {
 	// CACertificate is the PEM-encoded CA certificate used to
 	// verify the tunnel server's identity.
 	CACertificate []byte
+	// PrivateKeyPEM is the PEM-encoded ECDSA private key that
+	// corresponds to the CSR sent during this registration.
+	// Returned alongside the certificate to ensure the key/cert
+	// pair is always consistent (no TOCTOU race).
+	PrivateKeyPEM []byte
 	// AgentID is the identifier of the agent that registered. It is
 	// set by the TunnelConsumer so that callers can derive auth
 	// credentials without re-querying the hostname.

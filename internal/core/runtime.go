@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"io"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -215,6 +216,40 @@ func (s *SessionStore) DeletePortForward(id string) {
 	delete(s.pfSess, id)
 }
 
+// ReapStaleSessions scans all sessions and removes those whose Done
+// channel has already been closed (goroutine finished). This prevents
+// session leaks when clients disconnect without calling Cleanup.
+func (s *SessionStore) ReapStaleSessions() int {
+	reaped := 0
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for id, sess := range s.execSess {
+		select {
+		case <-sess.Done:
+			sess.Cancel()
+			_ = sess.Stdin.Close()
+			delete(s.execSess, id)
+			reaped++
+		default:
+		}
+	}
+
+	for id, sess := range s.pfSess {
+		select {
+		case <-sess.Done:
+			sess.Cancel()
+			_ = sess.Writer.Close()
+			delete(s.pfSess, id)
+			reaped++
+		default:
+		}
+	}
+
+	return reaped
+}
+
 // ---------------------------------------------------------------------------
 // Use case
 // ---------------------------------------------------------------------------
@@ -400,6 +435,26 @@ func (uc *RuntimeUseCase) Scale(ctx context.Context, cluster, group, version, re
 		return 0, err
 	}
 	return uc.runtime.UpdateScale(ctx, cluster, gvr, namespace, name, replicas)
+}
+
+// StartSessionReaper launches a background goroutine that
+// periodically scans for stale sessions (finished but not cleaned up)
+// and removes them. It blocks until ctx is cancelled.
+func (uc *RuntimeUseCase) StartSessionReaper(ctx context.Context, interval time.Duration) {
+	log := slog.Default().With("component", "session-reaper")
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if n := uc.sessions.ReapStaleSessions(); n > 0 {
+				log.Info("reaped stale sessions", "count", n)
+			}
+		}
+	}
 }
 
 // Restart validates the GVR and triggers a rolling restart.

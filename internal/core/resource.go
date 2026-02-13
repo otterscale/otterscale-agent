@@ -193,7 +193,13 @@ func (uc *ResourceUseCase) ResolveSchema(
 	}
 
 	v, err, _ := uc.schemaFlights.Do(key, func() (any, error) {
-		resolved, err := uc.discovery.ResolveSchema(ctx, cluster, group, version, kind)
+		// Use a non-cancellable context with its own timeout so that
+		// a single caller's cancellation does not fail all waiters
+		// sharing this singleflight key.
+		fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
+
+		resolved, err := uc.discovery.ResolveSchema(fetchCtx, cluster, group, version, kind)
 		if err != nil {
 			return nil, err
 		}
@@ -440,7 +446,13 @@ func (uc *ResourceUseCase) serverVersion(ctx context.Context, cluster string) (*
 	}
 
 	v, err, _ := uc.versionFlights.Do(cluster, func() (any, error) {
-		info, err := uc.discovery.ServerVersion(ctx, cluster)
+		// Use a non-cancellable context with its own timeout so that
+		// a single caller's cancellation does not fail all waiters
+		// sharing this singleflight key.
+		fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
+
+		info, err := uc.discovery.ServerVersion(fetchCtx, cluster)
 		if err != nil {
 			return nil, err
 		}

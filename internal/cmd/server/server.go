@@ -9,8 +9,10 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"time"
 
 	fleetv1 "github.com/otterscale/otterscale-agent/api/fleet/v1/pbconnect"
+	"github.com/otterscale/otterscale-agent/internal/core"
 	"github.com/otterscale/otterscale-agent/internal/middleware"
 	"github.com/otterscale/otterscale-agent/internal/providers/chisel"
 	"github.com/otterscale/otterscale-agent/internal/transport"
@@ -27,25 +29,34 @@ type Config struct {
 	KeycloakClientID string
 }
 
+// sessionReapInterval is the interval at which the session reaper
+// scans for and removes stale sessions.
+const sessionReapInterval = 30 * time.Second
+
 // Server binds an HTTP server (gRPC + REST) and a chisel tunnel
 // listener, running them in parallel via transport.Serve.
 type Server struct {
 	handler *Handler
 	tunnel  *chisel.Service
+	runtime *core.RuntimeUseCase
 }
 
 // NewServer returns a Server wired to the given handler and tunnel
 // provider. It accepts the concrete *chisel.Service rather than the
 // core.TunnelProvider interface because it needs direct access to the
 // underlying chisel server and CA for transport initialisation.
-func NewServer(handler *Handler, tunnel *chisel.Service) *Server {
-	return &Server{handler: handler, tunnel: tunnel}
+func NewServer(handler *Handler, tunnel *chisel.Service, runtime *core.RuntimeUseCase) *Server {
+	return &Server{handler: handler, tunnel: tunnel, runtime: runtime}
 }
 
 // Run starts both the HTTP and tunnel servers. It blocks until ctx
 // is cancelled or an unrecoverable error occurs. Health, reflection,
 // and fleet-registration endpoints are marked as public (no auth).
 func (s *Server) Run(ctx context.Context, cfg Config) error {
+	if cfg.KeycloakRealmURL == "" {
+		return fmt.Errorf("keycloak realm URL is required but not configured")
+	}
+
 	ca := s.tunnel.CA()
 
 	// Generate a server TLS certificate signed by the CA. Parse the
@@ -120,5 +131,25 @@ func (s *Server) Run(ctx context.Context, cfg Config) error {
 	// caught and shutdown is coordinated with the other servers.
 	healthChecker := chisel.NewHealthCheckListener(s.tunnel)
 
-	return transport.Serve(ctx, httpSrv, tunnelSrv, healthChecker)
+	// Session reaper periodically cleans up finished but unreleased
+	// exec/port-forward sessions to prevent memory leaks.
+	reaper := &sessionReaperListener{runtime: s.runtime}
+
+	return transport.Serve(ctx, httpSrv, tunnelSrv, healthChecker, reaper)
+}
+
+// sessionReaperListener adapts RuntimeUseCase.StartSessionReaper to
+// the transport.Listener interface so it participates in the managed
+// lifecycle alongside other servers.
+type sessionReaperListener struct {
+	runtime *core.RuntimeUseCase
+}
+
+func (l *sessionReaperListener) Start(ctx context.Context) error {
+	l.runtime.StartSessionReaper(ctx, sessionReapInterval)
+	return nil
+}
+
+func (l *sessionReaperListener) Stop(_ context.Context) error {
+	return nil // reaper stops when its context is cancelled
 }

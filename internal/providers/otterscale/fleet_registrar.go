@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"sync"
 	"time"
 
 	pb "github.com/otterscale/otterscale-agent/api/fleet/v1"
@@ -24,9 +23,6 @@ type fleetRegistrar struct {
 	agentID      string
 	agentVersion string // agent binary version, sent during registration
 	client       *http.Client
-
-	mu         sync.Mutex
-	privateKey []byte // PEM-encoded ECDSA private key from the latest registration
 }
 
 // NewFleetRegistrar returns a TunnelConsumer that registers agents
@@ -55,7 +51,9 @@ var _ core.TunnelConsumer = (*fleetRegistrar)(nil)
 // fleet service's Register RPC. The server signs the CSR with its
 // internal CA and returns the signed certificate, CA certificate,
 // tunnel endpoint, and the server's own version. A new key pair is
-// generated on every call to provide forward secrecy.
+// generated on every call to provide forward secrecy. The private
+// key is returned inside the Registration to guarantee the cert/key
+// pair is always consistent (no TOCTOU race).
 func (f *fleetRegistrar) Register(ctx context.Context, serverURL, cluster string) (core.Registration, error) {
 	key, keyPEM, err := pki.GenerateKey()
 	if err != nil {
@@ -79,25 +77,12 @@ func (f *fleetRegistrar) Register(ctx context.Context, serverURL, cluster string
 		return core.Registration{}, err
 	}
 
-	// Store the private key so that PrivateKeyPEM returns the key
-	// that matches the certificate from this registration.
-	f.mu.Lock()
-	f.privateKey = keyPEM
-	f.mu.Unlock()
-
 	return core.Registration{
 		Endpoint:      resp.GetEndpoint(),
 		Certificate:   resp.GetCertificate(),
 		CACertificate: resp.GetCaCertificate(),
+		PrivateKeyPEM: keyPEM,
 		AgentID:       f.agentID,
 		ServerVersion: resp.GetServerVersion(),
 	}, nil
-}
-
-// PrivateKeyPEM returns the PEM-encoded private key that corresponds
-// to the CSR sent during the most recent registration.
-func (f *fleetRegistrar) PrivateKeyPEM() []byte {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.privateKey
 }

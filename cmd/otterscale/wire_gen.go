@@ -56,7 +56,7 @@ func wireServer(v core.Version, conf *config.Config) (*server.Server, func(), er
 	runtimeUseCase := core.NewRuntimeUseCase(discoveryClient, runtimeRepo)
 	runtimeService := app.NewRuntimeService(runtimeUseCase)
 	handler := server.NewHandler(fleetService, resourceService, runtimeService)
-	serverServer := server.NewServer(handler, service)
+	serverServer := server.NewServer(handler, service, runtimeUseCase)
 	return serverServer, func() {
 	}, nil
 }

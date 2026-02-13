@@ -2,13 +2,13 @@ package kubernetes
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"strconv"
 	"time"
 
-	"connectrpc.com/authn"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -19,7 +19,6 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
-	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/remotecommand"
 	"k8s.io/client-go/transport/spdy"
 
@@ -79,7 +78,7 @@ func (r *runtimeRepo) PodLogs(ctx context.Context, cluster, namespace, name stri
 
 // Exec starts an interactive exec session and blocks until it completes.
 func (r *runtimeRepo) Exec(ctx context.Context, cluster, namespace, name string, opts core.ExecOptions) error {
-	config, err := r.spdyConfig(ctx, cluster)
+	config, err := r.kubernetes.spdyConfig(ctx, cluster)
 	if err != nil {
 		return err
 	}
@@ -171,7 +170,13 @@ func (r *runtimeRepo) UpdateScale(ctx context.Context, cluster string, gvr schem
 		return 0, err
 	}
 
-	newReplicas, _, _ := unstructured.NestedInt64(updated.Object, "spec", "replicas")
+	newReplicas, found, err := unstructured.NestedInt64(updated.Object, "spec", "replicas")
+	if err != nil {
+		return 0, apierrors.NewInternalError(fmt.Errorf("read updated replicas: %w", err))
+	}
+	if !found {
+		return 0, apierrors.NewInternalError(fmt.Errorf("spec.replicas not found in updated scale subresource"))
+	}
 	return int32(newReplicas), nil
 }
 
@@ -188,12 +193,23 @@ func (r *runtimeRepo) Restart(ctx context.Context, cluster string, gvr schema.Gr
 		return err
 	}
 
-	patch := fmt.Sprintf(
-		`{"spec":{"template":{"metadata":{"annotations":{"kubectl.kubernetes.io/restartedAt":"%s"}}}}}`,
-		time.Now().UTC().Format(time.RFC3339),
-	)
+	patchData := map[string]any{
+		"spec": map[string]any{
+			"template": map[string]any{
+				"metadata": map[string]any{
+					"annotations": map[string]any{
+						"kubectl.kubernetes.io/restartedAt": time.Now().UTC().Format(time.RFC3339),
+					},
+				},
+			},
+		},
+	}
+	data, err := json.Marshal(patchData)
+	if err != nil {
+		return fmt.Errorf("marshal restart patch: %w", err)
+	}
 
-	_, err = client.Resource(gvr).Namespace(namespace).Patch(ctx, name, types.MergePatchType, []byte(patch), metav1.PatchOptions{})
+	_, err = client.Resource(gvr).Namespace(namespace).Patch(ctx, name, types.MergePatchType, data, metav1.PatchOptions{})
 	return err
 }
 
@@ -203,8 +219,9 @@ func (r *runtimeRepo) Restart(ctx context.Context, cluster string, gvr schema.Gr
 
 // PortForward opens a port-forward session via SPDY and copies data
 // bidirectionally between the caller's stdin/stdout and the pod.
+// It waits for both copy directions to complete before returning.
 func (r *runtimeRepo) PortForward(ctx context.Context, cluster, namespace, name string, opts core.PortForwardOptions) error {
-	config, err := r.spdyConfig(ctx, cluster)
+	config, err := r.kubernetes.spdyConfig(ctx, cluster)
 	if err != nil {
 		return err
 	}
@@ -260,17 +277,17 @@ func (r *runtimeRepo) PortForward(ctx context.Context, cluster, namespace, name 
 	}
 	defer dataStream.Close()
 
-	// Check for immediate errors.
+	// Check for immediate errors from kubelet.
 	go func() {
 		buf := make([]byte, 1024)
 		n, _ := errorStream.Read(buf)
 		if n > 0 {
-			// Error from kubelet; the data stream will close shortly.
+			// Error from kubelet; close data stream to unblock copies.
 			_ = dataStream.Close()
 		}
 	}()
 
-	// Bidirectional copy.
+	// Bidirectional copy — wait for BOTH directions to complete.
 	errCh := make(chan error, 2)
 
 	go func() {
@@ -283,13 +300,21 @@ func (r *runtimeRepo) PortForward(ctx context.Context, cluster, namespace, name 
 		errCh <- err
 	}()
 
-	// Wait for either direction to complete or context cancellation.
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case err := <-errCh:
-		return err
+	var firstErr error
+	for i := 0; i < 2; i++ {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case err := <-errCh:
+			if err != nil && firstErr == nil {
+				firstErr = err
+				// Close the stream connection so the other direction
+				// terminates as well.
+				streamConn.Close()
+			}
+		}
 	}
+	return firstErr
 }
 
 // portForwardProtocolV1 is the subprotocol used for Kubernetes port
@@ -322,30 +347,6 @@ func (r *runtimeRepo) dynamicClient(ctx context.Context, cluster string) (*dynam
 		return nil, err
 	}
 	return dynamic.NewForConfig(config)
-}
-
-// spdyConfig builds a rest.Config suitable for SPDY connections
-// (exec, port-forward). Unlike impersonationConfig, it does NOT
-// set a pre-built Transport because SPDY executors and dialers need
-// to negotiate their own connection upgrade.
-func (r *runtimeRepo) spdyConfig(ctx context.Context, cluster string) (*rest.Config, error) {
-	userInfo, ok := authn.GetInfo(ctx).(core.UserInfo)
-	if !ok {
-		return nil, apierrors.NewUnauthorized("user info not found in context")
-	}
-
-	address, err := r.kubernetes.tunnel.ResolveAddress(cluster)
-	if err != nil {
-		return nil, apierrors.NewServiceUnavailable(err.Error())
-	}
-
-	return &rest.Config{
-		Host: address,
-		Impersonate: rest.ImpersonationConfig{
-			UserName: userInfo.Subject,
-			Groups:   userInfo.Groups,
-		},
-	}, nil
 }
 
 // Ensure httpstream.Connection is assignable (compile-time check).

@@ -7,7 +7,9 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"sync"
 
+	"github.com/Masterminds/semver/v3"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
@@ -34,6 +36,7 @@ const inClusterNamespacePath = "/var/run/secrets/kubernetes.io/serviceaccount/na
 // updater performs in-cluster Deployment image patches so the agent
 // can self-update to match the server version.
 type updater struct {
+	mu     sync.Mutex
 	client kubernetes.Interface // cached clientset
 	log    *slog.Logger
 }
@@ -79,7 +82,15 @@ type containerImagePatch struct {
 // patch updates the agent Deployment's container image to match the
 // given version using a strategic merge patch. This preserves all
 // other Deployment configuration (resources, env, volumes, etc.).
+// The version string is validated as semver to prevent arbitrary
+// image tag injection from a compromised server.
 func (u *updater) patch(ctx context.Context, version string) error {
+	// Validate the version is a legitimate semver tag to prevent
+	// arbitrary image injection (e.g. "latest@sha256:malicious...").
+	if _, err := semver.StrictNewVersion(strings.TrimPrefix(version, "v")); err != nil {
+		return fmt.Errorf("invalid server version %q: %w", version, err)
+	}
+
 	client, err := u.getOrCreateClient()
 	if err != nil {
 		return fmt.Errorf("create kube client: %w", err)
@@ -132,8 +143,12 @@ func (u *updater) patch(ctx context.Context, version string) error {
 
 // getOrCreateClient returns the cached Kubernetes clientset, creating
 // it on first use. The clientset is reused across patch calls to avoid
-// redundant connection setup.
+// redundant connection setup. Access is serialised by mu to prevent
+// data races if multiple registrations overlap.
 func (u *updater) getOrCreateClient() (kubernetes.Interface, error) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+
 	if u.client != nil {
 		return u.client, nil
 	}

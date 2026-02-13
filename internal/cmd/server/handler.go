@@ -67,10 +67,6 @@ func (h *Handler) Mount(mux *http.ServeMux) error {
 	mux.Handle(resourcev1.NewResourceServiceHandler(h.resource, interceptors))
 	mux.Handle(runtimev1.NewRuntimeServiceHandler(h.runtime, interceptors))
 
-	// Placeholder registrations for future features.
-	h.registerProxy(mux)
-	h.registerWebSocket(mux)
-
 	return nil
 }
 
@@ -88,15 +84,12 @@ func (h *Handler) registerOpsHandlers(mux *http.ServeMux, serviceNames []string)
 	if err != nil {
 		return err
 	}
+	// NOTE: This intentionally sets the global OTel MeterProvider so
+	// that otelconnect interceptors and other libraries can discover
+	// it without explicit injection. Ideally this would be injected
+	// via Wire, but otelconnect relies on the global provider.
 	otel.SetMeterProvider(metric.NewMeterProvider(metric.WithReader(exporter)))
 	mux.Handle("/metrics", promhttp.Handler())
 
 	return nil
 }
-
-// registerProxy is a placeholder for a future Prometheus reverse proxy.
-func (h *Handler) registerProxy(mux *http.ServeMux) {}
-
-// registerWebSocket is a placeholder for a future WebSocket handler
-// (e.g. VNC).
-func (h *Handler) registerWebSocket(mux *http.ServeMux) {}

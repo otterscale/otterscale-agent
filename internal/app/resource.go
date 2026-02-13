@@ -322,6 +322,16 @@ func (s *ResourceService) processEvent(event watch.Event) (*pb.WatchEvent, bool)
 	case watch.Error:
 		ret := &pb.WatchEvent{}
 		ret.SetType(pb.WatchEvent_TYPE_ERROR)
+		// Extract the Status object from the error event so
+		// clients can inspect the reason (e.g. 410 Gone → re-list).
+		if status, ok := event.Object.(*metav1.Status); ok {
+			statusMap, err := statusToMap(status)
+			if err == nil {
+				if resource, err := s.toProtoResource(statusMap); err == nil {
+					ret.SetResource(resource)
+				}
+			}
+		}
 		return ret, true
 
 	default:
@@ -428,6 +438,21 @@ func (s *ResourceService) toProtoWatchEventType(t watch.EventType) pb.WatchEvent
 	default:
 		return pb.WatchEvent_TYPE_UNSPECIFIED
 	}
+}
+
+// statusToMap converts a Kubernetes Status object into a generic
+// map[string]any so it can be serialised as a protobuf Struct and
+// included in watch error events.
+func statusToMap(status *metav1.Status) (map[string]any, error) {
+	data, err := json.Marshal(status)
+	if err != nil {
+		return nil, err
+	}
+	var m map[string]any
+	if err := json.Unmarshal(data, &m); err != nil {
+		return nil, err
+	}
+	return m, nil
 }
 
 // deref returns the value pointed to by ptr, or def if ptr is nil.

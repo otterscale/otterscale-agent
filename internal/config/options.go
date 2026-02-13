@@ -21,7 +21,7 @@ var ServerOptions = []Option{
 	{Key: keyServerAllowedOrigins, Flag: toFlag(keyServerAllowedOrigins), Default: []string{}, Description: "Server allowed origins"},
 	{Key: keyServerTunnelAddress, Flag: toFlag(keyServerTunnelAddress), Default: "127.0.0.1:8300", Description: "Server tunnel address"},
 	{Key: keyServerTunnelCASeed, Flag: toFlag(keyServerTunnelCASeed), Default: "change-me", Description: "Server tunnel CA seed for mTLS certificate issuance"},
-	{Key: keyServerKeycloakRealmURL, Flag: toFlag(keyServerKeycloakRealmURL), Default: "https://keycloak.example.com/realms/otterscale", Description: "Server keycloak realm url"},
+	{Key: keyServerKeycloakRealmURL, Flag: toFlag(keyServerKeycloakRealmURL), Default: "", Description: "Server keycloak realm url (required)"},
 	{Key: keyServerKeycloakClientID, Flag: toFlag(keyServerKeycloakClientID), Default: "otterscale", Description: "Server keycloak client id"},
 }
 

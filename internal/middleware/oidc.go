@@ -13,13 +13,21 @@ import (
 	"github.com/otterscale/otterscale-agent/internal/core"
 )
 
+// keycloakClaims holds the custom claims extracted from a Keycloak
+// ID token. The "groups" claim contains the user's Keycloak group
+// memberships.
+type keycloakClaims struct {
+	Groups []string `json:"groups"`
+}
+
 // NewOIDC creates a ConnectRPC authentication middleware that verifies
 // incoming Bearer tokens against the given OIDC issuer and client ID.
 //
-// On success, the authenticated user's subject and a fixed
-// "system:authenticated" group are stored in the request context as
-// core.UserInfo. Keycloak-native groups are intentionally not
-// forwarded to keep Keycloak and Kubernetes group namespaces separate.
+// On success, the authenticated user's subject and groups are stored
+// in the request context as core.UserInfo. Keycloak groups are
+// prefixed with "oidc:" to keep them separate from Kubernetes-native
+// groups and avoid unintended privilege escalation via name collisions.
+// The "system:authenticated" group is always included.
 func NewOIDC(issuer, clientID string) (*authn.Middleware, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -44,9 +52,22 @@ func NewOIDC(issuer, clientID string) (*authn.Middleware, error) {
 			return nil, authn.Errorf("invalid token: %s", err)
 		}
 
+		var claims keycloakClaims
+		if err := idToken.Claims(&claims); err != nil {
+			return nil, authn.Errorf("parse token claims: %s", err)
+		}
+
+		groups := make([]string, 0, len(claims.Groups)+1)
+		groups = append(groups, "system:authenticated")
+		for _, g := range claims.Groups {
+			// Prefix with "oidc:" to avoid collisions with
+			// Kubernetes built-in groups (e.g. "system:masters").
+			groups = append(groups, "oidc:"+g)
+		}
+
 		return core.UserInfo{
 			Subject: idToken.Subject,
-			Groups:  []string{"system:authenticated"},
+			Groups:  groups,
 		}, nil
 	}
 

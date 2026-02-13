@@ -4,7 +4,9 @@
 package app
 
 import (
+	"cmp"
 	"context"
+	"slices"
 
 	pb "github.com/otterscale/otterscale-agent/api/fleet/v1"
 	"github.com/otterscale/otterscale-agent/api/fleet/v1/pbconnect"
@@ -56,18 +58,22 @@ func (s *FleetService) Register(ctx context.Context, req *pb.RegisterRequest) (*
 	return resp, nil
 }
 
-// toProtoResources converts a slice of Unstructured objects into
-// protobuf Resource messages.
+// toProtoClusters converts a map of cluster names to Cluster domain
+// objects into a sorted slice of protobuf Cluster messages. Results
+// are sorted by name to ensure deterministic ordering.
 func (s *FleetService) toProtoClusters(m map[string]core.Cluster) []*pb.Cluster {
-	ret := []*pb.Cluster{}
+	ret := make([]*pb.Cluster, 0, len(m))
 	for name, cluster := range m {
 		ret = append(ret, s.toProtoCluster(name, cluster))
 	}
+	slices.SortFunc(ret, func(a, b *pb.Cluster) int {
+		return cmp.Compare(a.GetName(), b.GetName())
+	})
 	return ret
 }
 
-// toProtoResource wraps a raw Kubernetes object map in a protobuf
-// Resource message.
+// toProtoCluster converts a cluster name and its domain object into a
+// protobuf Cluster message.
 func (s *FleetService) toProtoCluster(name string, cluster core.Cluster) *pb.Cluster {
 	ret := &pb.Cluster{}
 	ret.SetName(name)

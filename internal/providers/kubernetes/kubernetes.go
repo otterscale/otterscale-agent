@@ -15,33 +15,40 @@ import (
 
 	"connectrpc.com/authn"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/client-go/discovery"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 
 	"github.com/otterscale/otterscale-agent/internal/core"
 )
 
-// transportEntry pairs a cached HTTP transport with the tunnel
-// address it was created for. When the address changes (e.g. after
-// cluster re-registration), the stale transport is evicted.
-type transportEntry struct {
-	address string
-	rt      http.RoundTripper
+// clusterClients holds cached Kubernetes clients for a single cluster.
+// All fields are created from the same tunnel address; when the
+// address changes the entire entry is replaced.
+type clusterClients struct {
+	address   string
+	rt        http.RoundTripper
+	discovery *discovery.DiscoveryClient
+	dynamic   *dynamic.DynamicClient
+	clientset *kubernetes.Clientset
 }
 
 // Kubernetes is the shared foundation for discoveryClient and
 // resourceRepo. It resolves cluster names to tunnel addresses and
-// builds impersonated rest.Configs.
+// builds impersonated rest.Configs. Clients are cached per-cluster
+// and invalidated when the tunnel address changes.
 type Kubernetes struct {
-	mu         sync.Mutex
-	tunnel     core.TunnelProvider
-	transports map[string]transportEntry // keyed by cluster name
+	mu      sync.Mutex
+	tunnel  core.TunnelProvider
+	clients map[string]*clusterClients // keyed by cluster name
 }
 
 // New creates a Kubernetes helper bound to the given TunnelProvider.
 func New(tunnel core.TunnelProvider) *Kubernetes {
 	return &Kubernetes{
-		tunnel:     tunnel,
-		transports: make(map[string]transportEntry),
+		tunnel:  tunnel,
+		clients: make(map[string]*clusterClients),
 	}
 }
 
@@ -59,21 +66,97 @@ func (k *Kubernetes) impersonationConfig(ctx context.Context, cluster string) (*
 		return nil, apierrors.NewServiceUnavailable(err.Error())
 	}
 
+	rt, err := k.roundTripper(cluster, address)
+	if err != nil {
+		return nil, err
+	}
+
 	cfg := &rest.Config{
 		Host: address,
 		Impersonate: rest.ImpersonationConfig{
 			UserName: userInfo.Subject,
 			Groups:   userInfo.Groups,
 		},
+		Transport: rt,
 	}
-
-	rt, err := k.roundTripper(cluster, address)
-	if err != nil {
-		return nil, err
-	}
-	cfg.Transport = rt
 
 	return cfg, nil
+}
+
+// spdyConfig builds a rest.Config suitable for SPDY connections
+// (exec, port-forward). Unlike impersonationConfig, it does NOT
+// set a pre-built Transport because SPDY executors and dialers need
+// to negotiate their own connection upgrade.
+func (k *Kubernetes) spdyConfig(ctx context.Context, cluster string) (*rest.Config, error) {
+	userInfo, ok := authn.GetInfo(ctx).(core.UserInfo)
+	if !ok {
+		return nil, apierrors.NewUnauthorized("user info not found in context")
+	}
+
+	address, err := k.tunnel.ResolveAddress(cluster)
+	if err != nil {
+		return nil, apierrors.NewServiceUnavailable(err.Error())
+	}
+
+	return &rest.Config{
+		Host: address,
+		Impersonate: rest.ImpersonationConfig{
+			UserName: userInfo.Subject,
+			Groups:   userInfo.Groups,
+		},
+	}, nil
+}
+
+// getClients returns cached clients for the given cluster, creating
+// or replacing them if the tunnel address has changed.
+func (k *Kubernetes) getClients(cluster, address string) (*clusterClients, error) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+
+	if entry, ok := k.clients[cluster]; ok && entry.address == address {
+		return entry, nil
+	}
+
+	// Address changed or first access — create fresh clients.
+	// Close idle connections on the old transport to avoid leaking
+	// TCP connections to a stale tunnel address.
+	if old, ok := k.clients[cluster]; ok {
+		closeTransport(old.rt)
+	}
+
+	cfg := &rest.Config{Host: address}
+
+	rt, err := rest.TransportFor(cfg)
+	if err != nil {
+		return nil, apierrors.NewInternalError(err)
+	}
+
+	cfgWithRT := &rest.Config{Host: address, Transport: rt}
+
+	disc, err := discovery.NewDiscoveryClientForConfig(cfgWithRT)
+	if err != nil {
+		return nil, apierrors.NewInternalError(err)
+	}
+
+	dyn, err := dynamic.NewForConfig(cfgWithRT)
+	if err != nil {
+		return nil, apierrors.NewInternalError(err)
+	}
+
+	cs, err := kubernetes.NewForConfig(cfgWithRT)
+	if err != nil {
+		return nil, apierrors.NewInternalError(err)
+	}
+
+	entry := &clusterClients{
+		address:   address,
+		rt:        rt,
+		discovery: disc,
+		dynamic:   dyn,
+		clientset: cs,
+	}
+	k.clients[cluster] = entry
+	return entry, nil
 }
 
 // roundTripper returns a cached HTTP transport for the given cluster.
@@ -85,19 +168,20 @@ func (k *Kubernetes) impersonationConfig(ctx context.Context, cluster string) (*
 // via HTTP headers, not at the transport level. This avoids creating
 // new TCP connections on every request.
 func (k *Kubernetes) roundTripper(cluster, address string) (http.RoundTripper, error) {
-	k.mu.Lock()
-	defer k.mu.Unlock()
-
-	if entry, ok := k.transports[cluster]; ok && entry.address == address {
-		return entry.rt, nil
-	}
-
-	rt, err := rest.TransportFor(&rest.Config{Host: address})
+	clients, err := k.getClients(cluster, address)
 	if err != nil {
-		return nil, apierrors.NewInternalError(err)
+		return nil, err
 	}
+	return clients.rt, nil
+}
 
-	k.transports[cluster] = transportEntry{address: address, rt: rt}
-
-	return rt, nil
+// closeTransport closes idle connections on the transport if it
+// supports the CloseIdleConnections method (e.g. *http.Transport).
+func closeTransport(rt http.RoundTripper) {
+	type idleCloser interface {
+		CloseIdleConnections()
+	}
+	if ic, ok := rt.(idleCloser); ok {
+		ic.CloseIdleConnections()
+	}
 }

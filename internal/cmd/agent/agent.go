@@ -103,7 +103,7 @@ func (a *Agent) register() tunnel.RegisterFunc {
 			Auth:      auth,
 			CACertPEM: reg.CACertificate,
 			CertPEM:   reg.Certificate,
-			KeyPEM:    a.tunnel.PrivateKeyPEM(),
+			KeyPEM:    reg.PrivateKeyPEM,
 		}, nil
 	}
 }
