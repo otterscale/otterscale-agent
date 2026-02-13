@@ -140,7 +140,7 @@ type RegisterResponse struct {
 	state                  protoimpl.MessageState `protogen:"opaque.v1"`
 	xxx_hidden_Fingerprint *string                `protobuf:"bytes,1,opt,name=fingerprint"`
 	xxx_hidden_Token       *string                `protobuf:"bytes,2,opt,name=token"`
-	xxx_hidden_TunnelPort  int32                  `protobuf:"varint,3,opt,name=tunnel_port,json=tunnelPort"`
+	xxx_hidden_TunnelHost  *string                `protobuf:"bytes,3,opt,name=tunnel_host,json=tunnelHost"`
 	XXX_raceDetectHookData protoimpl.RaceDetectHookData
 	XXX_presence           [1]uint32
 	unknownFields          protoimpl.UnknownFields
@@ -192,11 +192,14 @@ func (x *RegisterResponse) GetToken() string {
 	return ""
 }
 
-func (x *RegisterResponse) GetTunnelPort() int32 {
+func (x *RegisterResponse) GetTunnelHost() string {
 	if x != nil {
-		return x.xxx_hidden_TunnelPort
+		if x.xxx_hidden_TunnelHost != nil {
+			return *x.xxx_hidden_TunnelHost
+		}
+		return ""
 	}
-	return 0
+	return ""
 }
 
 func (x *RegisterResponse) SetFingerprint(v string) {
@@ -209,8 +212,8 @@ func (x *RegisterResponse) SetToken(v string) {
 	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 1, 3)
 }
 
-func (x *RegisterResponse) SetTunnelPort(v int32) {
-	x.xxx_hidden_TunnelPort = v
+func (x *RegisterResponse) SetTunnelHost(v string) {
+	x.xxx_hidden_TunnelHost = &v
 	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 2, 3)
 }
 
@@ -228,7 +231,7 @@ func (x *RegisterResponse) HasToken() bool {
 	return protoimpl.X.Present(&(x.XXX_presence[0]), 1)
 }
 
-func (x *RegisterResponse) HasTunnelPort() bool {
+func (x *RegisterResponse) HasTunnelHost() bool {
 	if x == nil {
 		return false
 	}
@@ -245,9 +248,9 @@ func (x *RegisterResponse) ClearToken() {
 	x.xxx_hidden_Token = nil
 }
 
-func (x *RegisterResponse) ClearTunnelPort() {
+func (x *RegisterResponse) ClearTunnelHost() {
 	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 2)
-	x.xxx_hidden_TunnelPort = 0
+	x.xxx_hidden_TunnelHost = nil
 }
 
 type RegisterResponse_builder struct {
@@ -257,8 +260,8 @@ type RegisterResponse_builder struct {
 	Fingerprint *string
 	// The token for the agent to register with the server.
 	Token *string
-	// The port of the tunnel server.
-	TunnelPort *int32
+	// The loopback host reserved for this cluster tunnel.
+	TunnelHost *string
 }
 
 func (b0 RegisterResponse_builder) Build() *RegisterResponse {
@@ -273,9 +276,9 @@ func (b0 RegisterResponse_builder) Build() *RegisterResponse {
 		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 1, 3)
 		x.xxx_hidden_Token = b.Token
 	}
-	if b.TunnelPort != nil {
+	if b.TunnelHost != nil {
 		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 2, 3)
-		x.xxx_hidden_TunnelPort = *b.TunnelPort
+		x.xxx_hidden_TunnelHost = b.TunnelHost
 	}
 	return m0
 }
@@ -291,8 +294,8 @@ const file_api_fleet_v1_fleet_proto_rawDesc = "" +
 	"\x10RegisterResponse\x12 \n" +
 	"\vfingerprint\x18\x01 \x01(\tR\vfingerprint\x12\x14\n" +
 	"\x05token\x18\x02 \x01(\tR\x05token\x12\x1f\n" +
-	"\vtunnel_port\x18\x03 \x01(\x05R\n" +
-	"tunnelPort2}\n" +
+	"\vtunnel_host\x18\x03 \x01(\tR\n" +
+	"tunnelHost2}\n" +
 	"\fFleetService\x12m\n" +
 	"\bRegister\x12$.otterscale.fleet.v1.RegisterRequest\x1a%.otterscale.fleet.v1.RegisterResponse\"\x14\x8a\xdf\xd5\x1d\x0f\n" +
 	"\rfleet-enabledB8Z6github.com/otterscale/otterscale-agent/api/fleet/v1;pbb\beditionsp\xe8\a"

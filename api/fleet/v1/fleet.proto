@@ -34,9 +34,9 @@ message RegisterResponse {
   // The server's tunnel fingerprint, used by the agent to verify the connection.
   string fingerprint = 1;
 
-    // The token for the agent to register with the server.
+  // The token for the agent to register with the server.
   string token = 2;
 
-  // The port of the tunnel server.
-  int32 tunnel_port = 3;
+  // The loopback host reserved for this cluster tunnel.
+  string tunnel_host = 3;
 }
