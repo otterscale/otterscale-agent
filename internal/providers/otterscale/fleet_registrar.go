@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"time"
 
 	pb "github.com/otterscale/otterscale-agent/api/fleet/v1"
 	"github.com/otterscale/otterscale-agent/api/fleet/v1/pbconnect"
@@ -25,7 +26,9 @@ type fleetRegistrar struct {
 // against the otterscale fleet API.
 func NewFleetRegistrar() core.TunnelConsumer {
 	return &fleetRegistrar{
-		client: http.DefaultClient,
+		client: &http.Client{
+			Timeout: 30 * time.Second,
+		},
 	}
 }
 

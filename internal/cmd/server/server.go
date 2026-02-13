@@ -4,15 +4,21 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 
 	fleetv1 "github.com/otterscale/otterscale-agent/api/fleet/v1/pbconnect"
-	"github.com/otterscale/otterscale-agent/internal/core"
 	"github.com/otterscale/otterscale-agent/internal/middleware"
+	"github.com/otterscale/otterscale-agent/internal/providers/chisel"
 	"github.com/otterscale/otterscale-agent/internal/transport"
 	"github.com/otterscale/otterscale-agent/internal/transport/http"
 	"github.com/otterscale/otterscale-agent/internal/transport/tunnel"
 )
+
+// defaultKeySeed is the insecure placeholder that ships in config
+// defaults. The server refuses to start if it is still in use.
+const defaultKeySeed = "change-me"
 
 // Config holds the runtime parameters for a Server.
 type Config struct {
@@ -28,12 +34,14 @@ type Config struct {
 // listener, running them in parallel via transport.Serve.
 type Server struct {
 	handler *Handler
-	tunnel  core.TunnelProvider
+	tunnel  *chisel.Service
 }
 
 // NewServer returns a Server wired to the given handler and tunnel
-// provider.
-func NewServer(handler *Handler, tunnel core.TunnelProvider) *Server {
+// provider. It accepts the concrete *chisel.Service rather than the
+// core.TunnelProvider interface because it needs direct access to the
+// underlying chisel server for transport initialisation.
+func NewServer(handler *Handler, tunnel *chisel.Service) *Server {
 	return &Server{handler: handler, tunnel: tunnel}
 }
 
@@ -41,6 +49,15 @@ func NewServer(handler *Handler, tunnel core.TunnelProvider) *Server {
 // is cancelled or an unrecoverable error occurs. Health, reflection,
 // and fleet-registration endpoints are marked as public (no auth).
 func (s *Server) Run(ctx context.Context, cfg Config) error {
+	if cfg.TunnelKeySeed == defaultKeySeed {
+		return errors.New("refusing to start: tunnel key seed is the insecure default \"change-me\"; " +
+			"set --tunnel-key-seed or OTTERSCALE_SERVER_TUNNEL_KEY_SEED to a unique secret")
+	}
+
+	// Warn about unauthenticated fleet registration endpoint.
+	slog.Warn("fleet Register endpoint is publicly accessible without authentication; " +
+		"consider adding a pre-shared token or mTLS for agent registration in production")
+
 	oidc, err := middleware.NewOIDC(cfg.KeycloakRealmURL, cfg.KeycloakClientID)
 	if err != nil {
 		return fmt.Errorf("failed to create OIDC middleware: %w", err)
@@ -54,7 +71,6 @@ func (s *Server) Run(ctx context.Context, cfg Config) error {
 			"/grpc.health.v1.Health/Check",
 			"/grpc.health.v1.Health/Watch",
 			"/grpc.reflection.v1.ServerReflection/ServerReflectionInfo",
-			fleetv1.FleetServiceListClustersProcedure,
 			fleetv1.FleetServiceRegisterProcedure,
 		}),
 		http.WithMount(s.handler.Mount),

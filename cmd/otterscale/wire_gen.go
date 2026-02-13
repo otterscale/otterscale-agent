@@ -20,6 +20,7 @@ import (
 
 // Injectors from wire.go:
 
+// wireCmd assembles the root Cobra command with configuration loaded.
 func wireCmd() (*cobra.Command, func(), error) {
 	configConfig, err := config.New()
 	if err != nil {
@@ -33,21 +34,25 @@ func wireCmd() (*cobra.Command, func(), error) {
 	}, nil
 }
 
+// wireServer assembles a fully wired Server with all gRPC services,
+// use-cases, and infrastructure providers.
 func wireServer() (*server.Server, func(), error) {
-	tunnelProvider := chisel.NewService()
-	fleetUseCase := core.NewFleetUseCase(tunnelProvider)
+	service := chisel.NewService()
+	fleetUseCase := core.NewFleetUseCase(service)
 	fleetService := app.NewFleetService(fleetUseCase)
-	kubernetesKubernetes := kubernetes.New(tunnelProvider)
+	kubernetesKubernetes := kubernetes.New(service)
 	discoveryClient := kubernetes.NewDiscoveryClient(kubernetesKubernetes)
 	resourceRepo := kubernetes.NewResourceRepo(kubernetesKubernetes)
 	resourceUseCase := core.NewResourceUseCase(discoveryClient, resourceRepo)
 	resourceService := app.NewResourceService(resourceUseCase)
 	handler := server.NewHandler(fleetService, resourceService)
-	serverServer := server.NewServer(handler, tunnelProvider)
+	serverServer := server.NewServer(handler, service)
 	return serverServer, func() {
 	}, nil
 }
 
+// wireAgent assembles a fully wired Agent with its handler and fleet
+// registrar.
 func wireAgent() (*agent.Agent, func(), error) {
 	handler := agent.NewHandler()
 	tunnelConsumer := otterscale.NewFleetRegistrar()

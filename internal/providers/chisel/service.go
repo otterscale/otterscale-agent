@@ -22,40 +22,52 @@ import (
 // Each cluster is differentiated by its loopback host, not its port.
 const tunnelPort = 16598
 
-// service manages the mapping between cluster names and unique
+// Service manages the mapping between cluster names and unique
 // loopback addresses, and provisions chisel users for each agent.
-type service struct {
+// It implements core.TunnelProvider and additionally exposes the
+// underlying chisel server via Server() for transport-layer init.
+type Service struct {
 	server *chserver.Server
 
-	mu           sync.Mutex
-	clusterHosts map[string]string    // cluster name -> loopback host
+	mu           sync.RWMutex
+	clusterHosts map[string]string   // cluster name -> loopback host
+	clusterUsers map[string]string   // cluster name -> chisel user name
 	usedHosts    map[string]struct{} // set of allocated hosts
 }
 
-// NewService returns a new TunnelProvider backed by chisel.
+// NewService returns a new Service backed by chisel.
 // The underlying chisel server is lazily initialized by the tunnel
 // transport layer; see tunnel.NewServer.
-func NewService() core.TunnelProvider {
-	return &service{
+func NewService() *Service {
+	return &Service{
 		server:       &chserver.Server{},
 		clusterHosts: make(map[string]string),
+		clusterUsers: make(map[string]string),
 		usedHosts:    make(map[string]struct{}),
 	}
 }
 
-var _ core.TunnelProvider = (*service)(nil)
+var _ core.TunnelProvider = (*Service)(nil)
 
 // Server returns the shared chisel server pointer. The tunnel
 // transport writes the fully initialized server into this pointer
-// at startup so both sides share the same instance.
-func (s *service) Server() *chserver.Server {
+// at startup so both sides share the same instance. This method is
+// intentionally NOT part of core.TunnelProvider to keep the domain
+// layer free of chisel dependencies.
+func (s *Service) Server() *chserver.Server {
 	return s.server
 }
 
+// Fingerprint returns the TLS fingerprint of the tunnel server so
+// that agents can verify server identity without a CA.
+func (s *Service) Fingerprint() string {
+	return s.server.GetFingerprint()
+}
+
 // ListClusters returns the names of all currently registered clusters.
-func (s *service) ListClusters() []string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+func (s *Service) ListClusters() []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
 	return slices.Collect(maps.Keys(s.clusterHosts))
 }
@@ -67,13 +79,22 @@ func (s *service) ListClusters() []string {
 // If the cluster was previously registered, the old host allocation is
 // released so that re-registration always moves the cluster to a fresh
 // address.
-func (s *service) RegisterCluster(cluster, user, pass string) (string, error) {
+func (s *Service) RegisterCluster(cluster, user, pass string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	host, err := s.allocateHost(cluster)
 	if err != nil {
 		return "", err
+	}
+
+	// Remove the previous user and host for this cluster, if any,
+	// so that stale credentials do not accumulate in chisel.
+	if prevUser, ok := s.clusterUsers[cluster]; ok {
+		s.server.DeleteUser(prevUser)
+	}
+	if prev, ok := s.clusterHosts[cluster]; ok {
+		s.releaseHost(prev)
 	}
 
 	// Restrict the user to reverse-tunnelling only the allocated
@@ -85,20 +106,17 @@ func (s *service) RegisterCluster(cluster, user, pass string) (string, error) {
 		return "", err
 	}
 
-	// Release the previous host so it can be reused by other clusters.
-	if prev, ok := s.clusterHosts[cluster]; ok {
-		s.releaseHost(prev)
-	}
 	s.clusterHosts[cluster] = host
+	s.clusterUsers[cluster] = user
 
 	return fmt.Sprintf("%s:%d", host, tunnelPort), nil
 }
 
 // ResolveAddress returns the HTTP base URL for the given cluster's
 // tunnel endpoint. Returns an error if the cluster is not registered.
-func (s *service) ResolveAddress(cluster string) (string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+func (s *Service) ResolveAddress(cluster string) (string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
 	host, ok := s.clusterHosts[cluster]
 	if !ok {
@@ -111,7 +129,7 @@ func (s *service) ResolveAddress(cluster string) (string, error) {
 // allocateHost picks a unique loopback address for the given cluster
 // by hashing the name and probing linearly until an unused address is
 // found. Must be called with mu held.
-func (s *service) allocateHost(cluster string) (string, error) {
+func (s *Service) allocateHost(cluster string) (string, error) {
 	base := hashKey(cluster)
 	for i := range uint32(1 << 24) {
 		candidate := hostFromIndex(base + i)
@@ -126,7 +144,7 @@ func (s *service) allocateHost(cluster string) (string, error) {
 
 // releaseHost returns a previously allocated host to the pool.
 // Must be called with mu held.
-func (s *service) releaseHost(host string) {
+func (s *Service) releaseHost(host string) {
 	delete(s.usedHosts, host)
 }
 

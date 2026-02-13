@@ -51,6 +51,10 @@ type ResourceRepo interface {
 // in memory before being re-fetched from the cluster.
 const schemaCacheTTL = 10 * time.Minute
 
+// minWatchListVersion is the minimum Kubernetes version that supports
+// the WatchList streaming feature (beta, default-on since 1.34).
+var minWatchListVersion = semver.MustParse("v1.34.0")
+
 // schemaCacheEntry pairs a cached schema with its expiration time.
 type schemaCacheEntry struct {
 	schema    *spec.Schema
@@ -268,10 +272,5 @@ func (uc *ResourceUseCase) watchListFeature(ctx context.Context, cluster string)
 		return false, err
 	}
 
-	watchListVersion, err := semver.NewVersion("v1.34.0")
-	if err != nil {
-		return false, err
-	}
-
-	return kubeVersion.GreaterThanEqual(watchListVersion), nil
+	return kubeVersion.GreaterThanEqual(minWatchListVersion), nil
 }

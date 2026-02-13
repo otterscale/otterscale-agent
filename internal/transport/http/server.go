@@ -49,6 +49,7 @@ func WithAuthMiddleware(m *authn.Middleware) ServerOption {
 }
 
 // WithPublicPaths configures paths that bypass authentication.
+// Paths are normalised to always include a leading "/".
 func WithPublicPaths(paths []string) ServerOption {
 	return func(s *Server) {
 		if len(paths) == 0 {
@@ -58,9 +59,13 @@ func WithPublicPaths(paths []string) ServerOption {
 			s.publicPaths = make(map[string]struct{}, len(paths))
 		}
 		for _, p := range paths {
-			if p != "" {
-				s.publicPaths[p] = struct{}{}
+			if p == "" {
+				continue
 			}
+			if p[0] != '/' {
+				p = "/" + p
+			}
+			s.publicPaths[p] = struct{}{}
 		}
 	}
 }

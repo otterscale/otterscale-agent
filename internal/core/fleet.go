@@ -8,16 +8,15 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
-
-	chserver "github.com/jpillora/chisel/server"
 )
 
 // TunnelProvider is the server-side abstraction for managing reverse
 // tunnels. It allocates unique endpoints per cluster and provisions
-// chisel users for each connecting agent.
+// tunnel users for each connecting agent.
 type TunnelProvider interface {
-	// Server returns the shared chisel server pointer.
-	Server() *chserver.Server
+	// Fingerprint returns the TLS fingerprint of the tunnel server
+	// so that agents can verify server identity without a CA.
+	Fingerprint() string
 	// ListClusters returns the names of all registered clusters.
 	ListClusters() []string
 	// RegisterCluster creates a tunnel user and returns the allocated endpoint.
@@ -69,7 +68,7 @@ func (uc *FleetUseCase) RegisterCluster(cluster, agentID string) (endpoint, toke
 // Fingerprint returns the TLS fingerprint of the tunnel server so
 // that agents can verify server identity without a CA.
 func (uc *FleetUseCase) Fingerprint() string {
-	return uc.tunnel.Server().GetFingerprint()
+	return uc.tunnel.Fingerprint()
 }
 
 // generateToken produces a 32-byte cryptographically random token

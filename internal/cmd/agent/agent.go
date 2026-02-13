@@ -53,6 +53,7 @@ func (a *Agent) Run(ctx context.Context, cfg Config) error {
 
 	tunnelClt, err := tunnel.NewClient(
 		tunnel.WithServerURL(cfg.ServerURL),
+		tunnel.WithTunnelServerURL(cfg.TunnelServerURL),
 		tunnel.WithCluster(cfg.Cluster),
 		tunnel.WithLocalPort(port),
 		tunnel.WithKeepAlive(cfg.TunnelTimeout),

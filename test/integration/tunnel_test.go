@@ -124,7 +124,7 @@ func TestFleetRegisterClusterReregisterAndReplaceAcrossAgents(t *testing.T) {
 	}
 }
 
-func initTunnelServer(t *testing.T, tunnel core.TunnelProvider) {
+func initTunnelServer(t *testing.T, tunnel *chisel.Service) {
 	t.Helper()
 	srv, err := tunneltransport.NewServer(
 		tunneltransport.WithKeySeed("test-seed"),
