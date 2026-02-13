@@ -138,9 +138,9 @@ func (b0 RegisterRequest_builder) Build() *RegisterRequest {
 // RegisterResponse contains the server's fingerprint for the agent to verify the connection.
 type RegisterResponse struct {
 	state                  protoimpl.MessageState `protogen:"opaque.v1"`
-	xxx_hidden_Fingerprint *string                `protobuf:"bytes,1,opt,name=fingerprint"`
-	xxx_hidden_Token       *string                `protobuf:"bytes,2,opt,name=token"`
-	xxx_hidden_TunnelHost  *string                `protobuf:"bytes,3,opt,name=tunnel_host,json=tunnelHost"`
+	xxx_hidden_Endpoint    *string                `protobuf:"bytes,1,opt,name=endpoint"`
+	xxx_hidden_Fingerprint *string                `protobuf:"bytes,2,opt,name=fingerprint"`
+	xxx_hidden_Token       *string                `protobuf:"bytes,3,opt,name=token"`
 	XXX_raceDetectHookData protoimpl.RaceDetectHookData
 	XXX_presence           [1]uint32
 	unknownFields          protoimpl.UnknownFields
@@ -172,6 +172,16 @@ func (x *RegisterResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
+func (x *RegisterResponse) GetEndpoint() string {
+	if x != nil {
+		if x.xxx_hidden_Endpoint != nil {
+			return *x.xxx_hidden_Endpoint
+		}
+		return ""
+	}
+	return ""
+}
+
 func (x *RegisterResponse) GetFingerprint() string {
 	if x != nil {
 		if x.xxx_hidden_Fingerprint != nil {
@@ -192,93 +202,83 @@ func (x *RegisterResponse) GetToken() string {
 	return ""
 }
 
-func (x *RegisterResponse) GetTunnelHost() string {
-	if x != nil {
-		if x.xxx_hidden_TunnelHost != nil {
-			return *x.xxx_hidden_TunnelHost
-		}
-		return ""
-	}
-	return ""
+func (x *RegisterResponse) SetEndpoint(v string) {
+	x.xxx_hidden_Endpoint = &v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 0, 3)
 }
 
 func (x *RegisterResponse) SetFingerprint(v string) {
 	x.xxx_hidden_Fingerprint = &v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 0, 3)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 1, 3)
 }
 
 func (x *RegisterResponse) SetToken(v string) {
 	x.xxx_hidden_Token = &v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 1, 3)
-}
-
-func (x *RegisterResponse) SetTunnelHost(v string) {
-	x.xxx_hidden_TunnelHost = &v
 	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 2, 3)
 }
 
-func (x *RegisterResponse) HasFingerprint() bool {
+func (x *RegisterResponse) HasEndpoint() bool {
 	if x == nil {
 		return false
 	}
 	return protoimpl.X.Present(&(x.XXX_presence[0]), 0)
 }
 
-func (x *RegisterResponse) HasToken() bool {
+func (x *RegisterResponse) HasFingerprint() bool {
 	if x == nil {
 		return false
 	}
 	return protoimpl.X.Present(&(x.XXX_presence[0]), 1)
 }
 
-func (x *RegisterResponse) HasTunnelHost() bool {
+func (x *RegisterResponse) HasToken() bool {
 	if x == nil {
 		return false
 	}
 	return protoimpl.X.Present(&(x.XXX_presence[0]), 2)
 }
 
-func (x *RegisterResponse) ClearFingerprint() {
+func (x *RegisterResponse) ClearEndpoint() {
 	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 0)
+	x.xxx_hidden_Endpoint = nil
+}
+
+func (x *RegisterResponse) ClearFingerprint() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 1)
 	x.xxx_hidden_Fingerprint = nil
 }
 
 func (x *RegisterResponse) ClearToken() {
-	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 1)
-	x.xxx_hidden_Token = nil
-}
-
-func (x *RegisterResponse) ClearTunnelHost() {
 	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 2)
-	x.xxx_hidden_TunnelHost = nil
+	x.xxx_hidden_Token = nil
 }
 
 type RegisterResponse_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
+	// The loopback endpoint reserved for this cluster tunnel.
+	Endpoint *string
 	// The server's tunnel fingerprint, used by the agent to verify the connection.
 	Fingerprint *string
 	// The token for the agent to register with the server.
 	Token *string
-	// The loopback host reserved for this cluster tunnel.
-	TunnelHost *string
 }
 
 func (b0 RegisterResponse_builder) Build() *RegisterResponse {
 	m0 := &RegisterResponse{}
 	b, x := &b0, m0
 	_, _ = b, x
-	if b.Fingerprint != nil {
+	if b.Endpoint != nil {
 		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 0, 3)
+		x.xxx_hidden_Endpoint = b.Endpoint
+	}
+	if b.Fingerprint != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 1, 3)
 		x.xxx_hidden_Fingerprint = b.Fingerprint
 	}
 	if b.Token != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 1, 3)
-		x.xxx_hidden_Token = b.Token
-	}
-	if b.TunnelHost != nil {
 		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 2, 3)
-		x.xxx_hidden_TunnelHost = b.TunnelHost
+		x.xxx_hidden_Token = b.Token
 	}
 	return m0
 }
@@ -290,12 +290,11 @@ const file_api_fleet_v1_fleet_proto_rawDesc = "" +
 	"\x18api/fleet/v1/fleet.proto\x12\x13otterscale.fleet.v1\x1a\x15api/annotations.proto\"F\n" +
 	"\x0fRegisterRequest\x12\x18\n" +
 	"\acluster\x18\x01 \x01(\tR\acluster\x12\x19\n" +
-	"\bagent_id\x18\x02 \x01(\tR\aagentId\"k\n" +
-	"\x10RegisterResponse\x12 \n" +
-	"\vfingerprint\x18\x01 \x01(\tR\vfingerprint\x12\x14\n" +
-	"\x05token\x18\x02 \x01(\tR\x05token\x12\x1f\n" +
-	"\vtunnel_host\x18\x03 \x01(\tR\n" +
-	"tunnelHost2}\n" +
+	"\bagent_id\x18\x02 \x01(\tR\aagentId\"f\n" +
+	"\x10RegisterResponse\x12\x1a\n" +
+	"\bendpoint\x18\x01 \x01(\tR\bendpoint\x12 \n" +
+	"\vfingerprint\x18\x02 \x01(\tR\vfingerprint\x12\x14\n" +
+	"\x05token\x18\x03 \x01(\tR\x05token2}\n" +
 	"\fFleetService\x12m\n" +
 	"\bRegister\x12$.otterscale.fleet.v1.RegisterRequest\x1a%.otterscale.fleet.v1.RegisterResponse\"\x14\x8a\xdf\xd5\x1d\x0f\n" +
 	"\rfleet-enabledB8Z6github.com/otterscale/otterscale-agent/api/fleet/v1;pbb\beditionsp\xe8\a"

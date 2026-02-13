@@ -31,12 +31,12 @@ message RegisterRequest {
 
 // RegisterResponse contains the server's fingerprint for the agent to verify the connection.
 message RegisterResponse {
+  // The loopback endpoint reserved for this cluster tunnel.
+  string endpoint = 1;
+
   // The server's tunnel fingerprint, used by the agent to verify the connection.
-  string fingerprint = 1;
+  string fingerprint = 2;
 
   // The token for the agent to register with the server.
-  string token = 2;
-
-  // The loopback host reserved for this cluster tunnel.
-  string tunnel_host = 3;
+  string token = 3;
 }
