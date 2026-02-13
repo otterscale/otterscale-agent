@@ -4,16 +4,26 @@ A hub-and-spoke gateway for managing Kubernetes resources across clusters throug
 
 The **server** (hub) authenticates requests via OIDC, then routes them through [Chisel](https://github.com/jpillora/chisel) reverse tunnels to **agents** (spokes) running inside target clusters. Agents proxy requests to the local Kubernetes API server using impersonation, so cluster RBAC is enforced at the edge.
 
-```
-                  ┌──────────────────────────────────────┐
-                  │             Server (hub)              │
- User ──OIDC──▶  │  ConnectRPC API   ◄── Chisel Tunnel ──┼──── Agent (cluster-a)
-                  │  :8299 (h2c)         :8300            │          ▼
-                  │                                       │     kube-apiserver
-                  │  Fleet + Resource                     │
-                  │  Services                             ├──── Agent (cluster-b)
-                  └──────────────────────────────────────┘          ▼
-                                                               kube-apiserver
+```mermaid
+flowchart LR
+    User -->|OIDC| Server
+
+    subgraph hub [Server]
+        Server["ConnectRPC API<br>:8299 h2c"]
+        Tunnel["Chisel Tunnel<br>:8300"]
+        Server --- Tunnel
+    end
+
+    Tunnel -->|reverse tunnel| AgentA
+    Tunnel -->|reverse tunnel| AgentB
+
+    subgraph clusterA [Cluster A]
+        AgentA[Agent] --> KubeA[kube-apiserver]
+    end
+
+    subgraph clusterB [Cluster B]
+        AgentB[Agent] --> KubeB[kube-apiserver]
+    end
 ```
 
 ## Features
