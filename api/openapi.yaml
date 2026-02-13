@@ -11,6 +11,84 @@ info:
     url: https://opensource.org/license/apache-2-0
   version: v1
 paths:
+  /otterscale.fleet.v1.FleetService/ListClusters:
+    post:
+      tags:
+        - FleetService
+      summary: ListClusters
+      description: |-
+        ListClusters returns all cluster identifiers that the current agent
+         is registered to. This is used to discover which clusters are available
+         for tunnel connections.
+      operationId: FleetService_ListClusters
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/otterscale.fleet.v1.ListClustersRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/otterscale.fleet.v1.ListClustersResponse'
+  /otterscale.fleet.v1.FleetService/Register:
+    post:
+      tags:
+        - FleetService
+      summary: Register
+      description: |-
+        Register allows an agent to register itself with the tunnel server.
+         The agent sends its cluster identity and tunnel port; the server responds
+         with its fingerprint so the agent can verify the tunnel connection.
+      operationId: FleetService_Register
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/otterscale.fleet.v1.RegisterRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/otterscale.fleet.v1.RegisterResponse'
   /otterscale.resource.v1.ResourceService/Apply:
     post:
       tags:
@@ -424,6 +502,55 @@ components:
           title: name
       title: Feature
       additionalProperties: false
+    otterscale.fleet.v1.ListClustersRequest:
+      type: object
+      title: ListClustersRequest
+      additionalProperties: false
+      description: ListClustersRequest is an empty request message for listing clusters.
+    otterscale.fleet.v1.ListClustersResponse:
+      type: object
+      properties:
+        clusters:
+          type: array
+          items:
+            type: string
+          title: clusters
+          description: The list of cluster identifiers.
+      title: ListClustersResponse
+      additionalProperties: false
+      description: ListClustersResponse contains the list of clusters the agent is registered to.
+    otterscale.fleet.v1.RegisterRequest:
+      type: object
+      properties:
+        cluster:
+          type: string
+          title: cluster
+          description: The cluster identifier this agent belongs to.
+        agentId:
+          type: string
+          title: agent_id
+          description: The agent identifier this agent uses to register with the server.
+      title: RegisterRequest
+      additionalProperties: false
+      description: RegisterRequest contains the agent's cluster identity and tunnel port.
+    otterscale.fleet.v1.RegisterResponse:
+      type: object
+      properties:
+        endpoint:
+          type: string
+          title: endpoint
+          description: The loopback endpoint reserved for this cluster tunnel.
+        fingerprint:
+          type: string
+          title: fingerprint
+          description: The server's tunnel fingerprint, used by the agent to verify the connection.
+        token:
+          type: string
+          title: token
+          description: The token for the agent to register with the server.
+      title: RegisterResponse
+      additionalProperties: false
+      description: RegisterResponse contains the server's fingerprint for the agent to verify the connection.
     otterscale.resource.v1.APIResource:
       type: object
       properties:
@@ -769,6 +896,10 @@ tags:
     description: |-
       ResourceService provides a generic interface to manage any Kubernetes resources,
        including native objects (Pods, Deployments) and Custom Resource Definitions (CRDs).
+  - name: FleetService
+    description: |-
+      FleetService manages the lifecycle of agent-to-server tunnel connections,
+       including registration and health checking.
 externalDocs:
   description: Website
   url: https://otterscale.github.io
