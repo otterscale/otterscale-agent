@@ -2,6 +2,7 @@ package http
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -19,8 +20,16 @@ func TestNewServer_PublicPathsBypassAuth(t *testing.T) {
 		return struct{}{}, nil
 	})
 
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+
 	srv, err := NewServer(
+		WithListener(ln),
 		WithAuthMiddleware(authMiddleware),
+		WithAllowedOrigins([]string{"https://example.com"}),
 		WithPublicPaths([]string{"/public"}),
 		WithMount(func(mux *http.ServeMux) error {
 			mux.HandleFunc("/public", func(w http.ResponseWriter, _ *http.Request) {

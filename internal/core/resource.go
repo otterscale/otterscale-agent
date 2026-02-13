@@ -61,6 +61,12 @@ type schemaCacheEntry struct {
 	expiresAt time.Time
 }
 
+// versionCacheEntry pairs a cached server version with its expiration.
+type versionCacheEntry struct {
+	version   *version.Info
+	expiresAt time.Time
+}
+
 // ResourceUseCase provides the application-level API for managing
 // Kubernetes resources across multiple clusters. It validates GVRs
 // via the DiscoveryClient, caches OpenAPI schemas with singleflight
@@ -70,18 +76,21 @@ type ResourceUseCase struct {
 	discovery DiscoveryClient
 	resource  ResourceRepo
 
-	mu            sync.RWMutex
-	schemaCache   map[string]*schemaCacheEntry
-	schemaFlights singleflight.Group
+	mu             sync.RWMutex
+	schemaCache    map[string]*schemaCacheEntry
+	versionCache   map[string]*versionCacheEntry
+	schemaFlights  singleflight.Group
+	versionFlights singleflight.Group
 }
 
 // NewResourceUseCase returns a ResourceUseCase wired to the given
 // discovery and resource backends.
 func NewResourceUseCase(discovery DiscoveryClient, resource ResourceRepo) *ResourceUseCase {
 	return &ResourceUseCase{
-		discovery:   discovery,
-		resource:    resource,
-		schemaCache: make(map[string]*schemaCacheEntry),
+		discovery:    discovery,
+		resource:     resource,
+		schemaCache:  make(map[string]*schemaCacheEntry),
+		versionCache: make(map[string]*versionCacheEntry),
 	}
 }
 
@@ -111,6 +120,7 @@ func (uc *ResourceUseCase) ResolveSchema(ctx context.Context, cluster, group, ve
 		}
 
 		uc.mu.Lock()
+		uc.evictExpired()
 		uc.schemaCache[key] = &schemaCacheEntry{
 			schema:    resolved,
 			expiresAt: time.Now().Add(schemaCacheTTL),
@@ -260,9 +270,11 @@ func (uc *ResourceUseCase) cleanObject(obj *unstructured.Unstructured) {
 
 // watchListFeature reports whether the target cluster supports the
 // WatchList streaming feature (beta, default-on since Kubernetes 1.34).
+// The server version is cached per cluster to avoid an extra RPC on
+// every Watch call.
 // See https://kubernetes.io/docs/reference/using-api/api-concepts/#streaming-lists
 func (uc *ResourceUseCase) watchListFeature(ctx context.Context, cluster string) (bool, error) {
-	info, err := uc.discovery.ServerVersion(ctx, cluster)
+	info, err := uc.serverVersion(ctx, cluster)
 	if err != nil {
 		return false, err
 	}
@@ -273,4 +285,54 @@ func (uc *ResourceUseCase) watchListFeature(ctx context.Context, cluster string)
 	}
 
 	return kubeVersion.GreaterThanEqual(minWatchListVersion), nil
+}
+
+// serverVersion returns the cached Kubernetes version for the given
+// cluster. Results are cached for schemaCacheTTL and concurrent
+// requests are deduplicated via singleflight.
+func (uc *ResourceUseCase) serverVersion(ctx context.Context, cluster string) (*version.Info, error) {
+	uc.mu.RLock()
+	entry, ok := uc.versionCache[cluster]
+	uc.mu.RUnlock()
+
+	if ok && time.Now().Before(entry.expiresAt) {
+		return entry.version, nil
+	}
+
+	v, err, _ := uc.versionFlights.Do(cluster, func() (any, error) {
+		info, err := uc.discovery.ServerVersion(ctx, cluster)
+		if err != nil {
+			return nil, err
+		}
+
+		uc.mu.Lock()
+		uc.versionCache[cluster] = &versionCacheEntry{
+			version:   info,
+			expiresAt: time.Now().Add(schemaCacheTTL),
+		}
+		uc.mu.Unlock()
+
+		return info, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return v.(*version.Info), nil
+}
+
+// evictExpired removes expired entries from the schema and version
+// caches. Must be called with mu held for writing.
+func (uc *ResourceUseCase) evictExpired() {
+	now := time.Now()
+	for key, entry := range uc.schemaCache {
+		if now.After(entry.expiresAt) {
+			delete(uc.schemaCache, key)
+		}
+	}
+	for key, entry := range uc.versionCache {
+		if now.After(entry.expiresAt) {
+			delete(uc.versionCache, key)
+		}
+	}
 }

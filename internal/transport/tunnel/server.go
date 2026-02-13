@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"sync/atomic"
 
 	"github.com/google/uuid"
 	chserver "github.com/jpillora/chisel/server"
@@ -16,12 +17,12 @@ type ServerOption func(*Server)
 // Server manages a chisel reverse-tunnel listener with mTLS
 // certificate authentication and automatic user provisioning.
 type Server struct {
-	inner   *chserver.Server // shared pointer; see WithServer
-	address string
-	tlsCert string // file path to server certificate
-	tlsKey  string // file path to server private key
-	tlsCA   string // file path to CA certificate (enables mTLS)
-	log     *slog.Logger
+	serverRef *atomic.Pointer[chserver.Server] // shared with TunnelProvider
+	address   string
+	tlsCert   string // file path to server certificate
+	tlsKey    string // file path to server private key
+	tlsCA     string // file path to CA certificate (enables mTLS)
+	log       *slog.Logger
 }
 
 // WithAddress configures the listen address (e.g. ":8300").
@@ -46,11 +47,12 @@ func WithTLSCA(path string) ServerOption {
 	return func(s *Server) { s.tlsCA = path }
 }
 
-// WithServer injects a shared chisel server pointer. The pointer is
-// typically owned by a TunnelProvider; Start will initialize it in place
-// so that both sides share the same running server instance.
-func WithServer(srv *chserver.Server) ServerOption {
-	return func(s *Server) { s.inner = srv }
+// WithServer injects a shared atomic server reference. The reference
+// is typically owned by a TunnelProvider; init will store the fully
+// initialized server into it so that both sides share the same
+// running instance.
+func WithServer(ref *atomic.Pointer[chserver.Server]) ServerOption {
+	return func(s *Server) { s.serverRef = ref }
 }
 
 // WithServerLogger configures a structured logger. Defaults to
@@ -64,8 +66,8 @@ func WithServerLogger(log *slog.Logger) ServerOption {
 // immediately, even before Start is called.
 func NewServer(opts ...ServerOption) (*Server, error) {
 	s := &Server{
-		inner:   &chserver.Server{},
-		address: ":8300",
+		serverRef: &atomic.Pointer[chserver.Server]{},
+		address:   ":8300",
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -88,25 +90,27 @@ func (s *Server) Start(ctx context.Context) error {
 
 	s.log.Info("starting", "address", s.address)
 
-	if err := s.inner.StartContext(ctx, host, port); err != nil {
+	srv := s.serverRef.Load()
+	if err := srv.StartContext(ctx, host, port); err != nil {
 		return fmt.Errorf("tunnel server start: %w", err)
 	}
 
-	return s.inner.Wait()
+	return srv.Wait()
 }
 
 // Stop gracefully shuts down the tunnel server.
 func (s *Server) Stop(_ context.Context) error {
-	if s.inner == nil {
+	srv := s.serverRef.Load()
+	if srv == nil {
 		return nil
 	}
 	s.log.Info("shutting down")
-	return s.inner.Close()
+	return srv.Close()
 }
 
-// init creates the real chisel server and copies it into the shared
-// pointer so that any TunnelProvider holding the same reference sees
-// the fully initialized instance.
+// init creates the real chisel server and stores it into the shared
+// atomic reference so that any TunnelProvider holding the same
+// reference sees the fully initialized instance.
 func (s *Server) init() error {
 	cfg := &chserver.Config{
 		Reverse: true,
@@ -132,8 +136,8 @@ func (s *Server) init() error {
 		return err
 	}
 
-	// Copy into the shared pointer so the TunnelProvider sees the
-	// initialized server.
-	*s.inner = *ch
+	// Store the pointer into the shared atomic reference so the
+	// TunnelProvider sees the initialized server.
+	s.serverRef.Store(ch)
 	return nil
 }

@@ -5,7 +5,6 @@ package agent
 import (
 	"context"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/otterscale/otterscale-agent/internal/core"
@@ -83,8 +82,10 @@ func (a *Agent) register() tunnel.RegisterFunc {
 		// Derive the chisel auth string from the signed
 		// certificate. This must match the password the server
 		// computed when it signed the same certificate.
-		agentID, _ := os.Hostname()
-		auth := pki.DeriveAuth(agentID, reg.Certificate)
+		auth, err := pki.DeriveAuth(reg.AgentID, reg.Certificate)
+		if err != nil {
+			return nil, fmt.Errorf("derive auth: %w", err)
+		}
 
 		return &tunnel.RegisterResult{
 			Endpoint:  reg.Endpoint,

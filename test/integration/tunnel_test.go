@@ -64,7 +64,7 @@ func TestFleetRegisterClusterLatestAgentWinsForSameCluster(t *testing.T) {
 	csr1 := generateCSR(t, "agent-r-1")
 	csr2 := generateCSR(t, "agent-r-2")
 
-	reg1, err := fleet.RegisterCluster("cluster-r", "agent-r-1", csr1)
+	_, err := fleet.RegisterCluster("cluster-r", "agent-r-1", csr1)
 	if err != nil {
 		t.Fatalf("register agent-r-1: %v", err)
 	}
@@ -73,16 +73,20 @@ func TestFleetRegisterClusterLatestAgentWinsForSameCluster(t *testing.T) {
 		t.Fatalf("register agent-r-2: %v", err)
 	}
 
-	if reg1.Endpoint == reg2.Endpoint {
-		t.Fatalf("expected route to move to a new endpoint, got %q", reg1.Endpoint)
-	}
-
+	// After re-registration the route must resolve to the latest
+	// agent's endpoint regardless of whether the host was reused.
 	addr, err := tunnel.ResolveAddress("cluster-r")
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
 	if addr != "http://"+reg2.Endpoint {
 		t.Fatalf("expected resolve to use latest agent endpoint %q, got %q", reg2.Endpoint, addr)
+	}
+
+	// Only one cluster should be registered.
+	clusters := tunnel.ListClusters()
+	if len(clusters) != 1 || clusters[0] != "cluster-r" {
+		t.Fatalf("expected exactly one cluster 'cluster-r', got %v", clusters)
 	}
 }
 
@@ -98,14 +102,14 @@ func TestFleetRegisterClusterReregisterAndReplaceAcrossAgents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("register agent-a #1: %v", err)
 	}
+
 	regB, err := fleet.RegisterCluster("cluster-z", "agent-b", csrB)
 	if err != nil {
 		t.Fatalf("register agent-b: %v", err)
 	}
-	if regA1.Endpoint == regB.Endpoint {
-		t.Fatalf("expected agent-b to replace route endpoint, got same endpoint %q", regA1.Endpoint)
-	}
 
+	// After re-registration for the same cluster, the route must
+	// resolve to the latest agent's endpoint.
 	addrB, err := tunnel.ResolveAddress("cluster-z")
 	if err != nil {
 		t.Fatalf("resolve after agent-b register: %v", err)
@@ -121,8 +125,14 @@ func TestFleetRegisterClusterReregisterAndReplaceAcrossAgents(t *testing.T) {
 
 	// Each registration produces a distinct certificate (different
 	// serial numbers) so the derived auth must differ.
-	authA1 := pki.DeriveAuth("agent-a", regA1.Certificate)
-	authA2 := pki.DeriveAuth("agent-a", regA2.Certificate)
+	authA1, err := pki.DeriveAuth("agent-a", regA1.Certificate)
+	if err != nil {
+		t.Fatalf("derive auth A1: %v", err)
+	}
+	authA2, err := pki.DeriveAuth("agent-a", regA2.Certificate)
+	if err != nil {
+		t.Fatalf("derive auth A2: %v", err)
+	}
 	if authA1 == authA2 {
 		t.Fatal("expected auth rotation for same agent re-register")
 	}
@@ -150,7 +160,7 @@ func initTunnelServer(t *testing.T, tunnel *chisel.Service) {
 	tunnel.SetCA(ca)
 
 	srv, err := tunneltransport.NewServer(
-		tunneltransport.WithServer(tunnel.Server()),
+		tunneltransport.WithServer(tunnel.ServerRef()),
 	)
 	if err != nil {
 		t.Fatalf("init tunnel server: %v", err)

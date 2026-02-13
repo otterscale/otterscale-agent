@@ -20,20 +20,28 @@ import (
 	"github.com/otterscale/otterscale-agent/internal/core"
 )
 
+// transportEntry pairs a cached HTTP transport with the tunnel
+// address it was created for. When the address changes (e.g. after
+// cluster re-registration), the stale transport is evicted.
+type transportEntry struct {
+	address string
+	rt      http.RoundTripper
+}
+
 // Kubernetes is the shared foundation for discoveryClient and
 // resourceRepo. It resolves cluster names to tunnel addresses and
 // builds impersonated rest.Configs.
 type Kubernetes struct {
 	mu         sync.Mutex
 	tunnel     core.TunnelProvider
-	transports map[string]http.RoundTripper // keyed by cluster name
+	transports map[string]transportEntry // keyed by cluster name
 }
 
 // New creates a Kubernetes helper bound to the given TunnelProvider.
 func New(tunnel core.TunnelProvider) *Kubernetes {
 	return &Kubernetes{
 		tunnel:     tunnel,
-		transports: make(map[string]http.RoundTripper),
+		transports: make(map[string]transportEntry),
 	}
 }
 
@@ -69,6 +77,10 @@ func (k *Kubernetes) impersonationConfig(ctx context.Context, cluster string) (*
 }
 
 // roundTripper returns a cached HTTP transport for the given cluster.
+// If the cached transport's address does not match the current tunnel
+// address (e.g. after cluster re-registration), the stale entry is
+// evicted and a fresh transport is created.
+//
 // Transports are shared across users because impersonation is handled
 // via HTTP headers, not at the transport level. This avoids creating
 // new TCP connections on every request.
@@ -76,8 +88,8 @@ func (k *Kubernetes) roundTripper(cluster, address string) (http.RoundTripper, e
 	k.mu.Lock()
 	defer k.mu.Unlock()
 
-	if rt, ok := k.transports[cluster]; ok {
-		return rt, nil
+	if entry, ok := k.transports[cluster]; ok && entry.address == address {
+		return entry.rt, nil
 	}
 
 	rt, err := rest.TransportFor(&rest.Config{Host: address})
@@ -85,7 +97,7 @@ func (k *Kubernetes) roundTripper(cluster, address string) (http.RoundTripper, e
 		return nil, apierrors.NewInternalError(err)
 	}
 
-	k.transports[cluster] = rt
+	k.transports[cluster] = transportEntry{address: address, rt: rt}
 
 	return rt, nil
 }

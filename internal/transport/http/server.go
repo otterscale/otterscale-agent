@@ -100,6 +100,13 @@ func NewServer(opts ...ServerOption) (*Server, error) {
 	if s.log == nil {
 		s.log = slog.Default().With("component", "http-server")
 	}
+	// When authentication is enabled (server mode), require explicit
+	// CORS origins to avoid accidentally exposing the API to all
+	// origins in production.
+	if s.authMiddleware != nil && len(s.allowedOrigins) == 0 {
+		return nil, fmt.Errorf("http server: allowed origins must be configured when authentication is enabled; " +
+			"set --allowed-origins or OTTERSCALE_SERVER_ALLOWED_ORIGINS")
+	}
 	if s.listener == nil {
 		ln, err := net.Listen("tcp", s.address)
 		if err != nil {
@@ -211,8 +218,9 @@ func (s *Server) wrapAuth(mux *http.ServeMux, next http.Handler) http.Handler {
 	})
 }
 
-// wrapCORS applies CORS headers. When no origins are configured it
-// defaults to allowing all origins.
+// wrapCORS applies CORS headers. When no origins are configured
+// (agent mode) it allows all origins. In server mode the startup
+// validation in NewServer ensures allowedOrigins is non-empty.
 func (s *Server) wrapCORS(next http.Handler) http.Handler {
 	if len(s.allowedOrigins) == 0 {
 		return cors.AllowAll().Handler(next)

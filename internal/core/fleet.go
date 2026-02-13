@@ -45,6 +45,10 @@ type Registration struct {
 	// CACertificate is the PEM-encoded CA certificate used to
 	// verify the tunnel server's identity.
 	CACertificate []byte
+	// AgentID is the identifier of the agent that registered. It is
+	// set by the TunnelConsumer so that callers can derive auth
+	// credentials without re-querying the hostname.
+	AgentID string
 }
 
 // FleetUseCase orchestrates cluster registration on the server side.

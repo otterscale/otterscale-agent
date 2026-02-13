@@ -126,7 +126,7 @@ func (s *Server) Run(ctx context.Context, cfg Config) error {
 		tunnel.WithTLSCert(certFile),
 		tunnel.WithTLSKey(keyFile),
 		tunnel.WithTLSCA(caFile),
-		tunnel.WithServer(s.tunnel.Server()),
+		tunnel.WithServer(s.tunnel.ServerRef()),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create tunnel server: %w", err)

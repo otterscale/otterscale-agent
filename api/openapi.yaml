@@ -530,9 +530,18 @@ components:
           type: string
           title: agent_id
           description: The agent identifier this agent uses to register with the server.
+        csr:
+          type: string
+          title: csr
+          format: byte
+          description: |-
+            PEM-encoded PKCS#10 certificate signing request. The server signs
+             this with its internal CA and returns the issued certificate.
       title: RegisterRequest
       additionalProperties: false
-      description: RegisterRequest contains the agent's cluster identity and tunnel port.
+      description: |-
+        RegisterRequest contains the agent's cluster identity and a CSR for
+         mTLS certificate issuance.
     otterscale.fleet.v1.RegisterResponse:
       type: object
       properties:
@@ -540,17 +549,21 @@ components:
           type: string
           title: endpoint
           description: The loopback endpoint reserved for this cluster tunnel.
-        fingerprint:
+        certificate:
           type: string
-          title: fingerprint
-          description: The server's tunnel fingerprint, used by the agent to verify the connection.
-        token:
+          title: certificate
+          format: byte
+          description: PEM-encoded X.509 certificate signed by the server's CA.
+        caCertificate:
           type: string
-          title: token
-          description: The token for the agent to register with the server.
+          title: ca_certificate
+          format: byte
+          description: PEM-encoded CA certificate for verifying the tunnel server.
       title: RegisterResponse
       additionalProperties: false
-      description: RegisterResponse contains the server's fingerprint for the agent to verify the connection.
+      description: |-
+        RegisterResponse contains a CA-signed certificate and the CA
+         certificate so the agent can establish an mTLS tunnel connection.
     otterscale.resource.v1.APIResource:
       type: object
       properties:
@@ -892,14 +905,14 @@ components:
       scheme: basic
 security: []
 tags:
-  - name: ResourceService
-    description: |-
-      ResourceService provides a generic interface to manage any Kubernetes resources,
-       including native objects (Pods, Deployments) and Custom Resource Definitions (CRDs).
   - name: FleetService
     description: |-
       FleetService manages the lifecycle of agent-to-server tunnel connections,
        including registration and health checking.
+  - name: ResourceService
+    description: |-
+      ResourceService provides a generic interface to manage any Kubernetes resources,
+       including native objects (Pods, Deployments) and Custom Resource Definitions (CRDs).
 externalDocs:
   description: Website
   url: https://otterscale.github.io

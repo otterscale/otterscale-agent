@@ -19,12 +19,20 @@ import (
 	"math/big"
 	"net"
 	"time"
+
+	"golang.org/x/crypto/hkdf"
 )
 
 // certValidity is the default validity period for agent certificates
 // signed by the CA. Short-lived certificates limit the blast radius
 // of a compromised key and avoid the need for explicit revocation.
 const certValidity = 24 * time.Hour
+
+// caEpoch is the fixed time origin used for the deterministic CA
+// certificate. Using a constant avoids the non-determinism that
+// time.Now() would introduce, ensuring the CA certificate is
+// byte-identical across restarts for the same seed.
+var caEpoch = time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 
 // CA holds a self-signed certificate authority key pair and provides
 // methods for signing CSRs and generating server certificates.
@@ -52,15 +60,18 @@ func NewCAFromSeed(seed string) (*CA, error) {
 			Organization: []string{"otterscale"},
 			CommonName:   "otterscale-ca",
 		},
-		NotBefore:             time.Now().Add(-1 * time.Hour),
-		NotAfter:              time.Now().Add(10 * 365 * 24 * time.Hour),
+		NotBefore:             caEpoch,
+		NotAfter:              caEpoch.Add(10 * 365 * 24 * time.Hour),
 		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
 		BasicConstraintsValid: true,
 		IsCA:                  true,
 		MaxPathLen:            0,
 	}
 
-	certDER, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	// Use a deterministic reader for signing so that the CA
+	// certificate is byte-identical across restarts for the same seed.
+	signReader := hkdf.New(sha256.New, []byte(seed), nil, []byte("ca-sign"))
+	certDER, err := x509.CreateCertificate(signReader, tmpl, tmpl, &key.PublicKey, key)
 	if err != nil {
 		return nil, fmt.Errorf("pki: create CA cert: %w", err)
 	}
@@ -211,14 +222,14 @@ func GenerateCSR(key *ecdsa.PrivateKey, cn string) ([]byte, error) {
 // ("user:password") from the agent ID and a signed certificate.
 // Both the server (which signed the cert) and the agent (which
 // received the cert) can independently compute this value.
-func DeriveAuth(agentID string, certPEM []byte) string {
+func DeriveAuth(agentID string, certPEM []byte) (string, error) {
 	block, _ := pem.Decode(certPEM)
 	if block == nil {
-		return agentID + ":"
+		return "", fmt.Errorf("pki: failed to decode certificate PEM")
 	}
 	h := sha256.Sum256(block.Bytes)
 	pass := base64.RawURLEncoding.EncodeToString(h[:24])
-	return agentID + ":" + pass
+	return agentID + ":" + pass, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -226,11 +237,11 @@ func DeriveAuth(agentID string, certPEM []byte) string {
 // ---------------------------------------------------------------------------
 
 // deriveKey deterministically produces an ECDSA P-256 private key
-// from a seed and a label using SHA-256. This is intentionally simple:
-// the seed should already have sufficient entropy.
+// from a seed and a label using HKDF (RFC 5869). The seed should
+// have sufficient entropy (e.g. a passphrase or random string).
 func deriveKey(seed, label string) (*ecdsa.PrivateKey, error) {
-	h := sha256.Sum256([]byte(label + ":" + seed))
-	key, err := ecdsa.GenerateKey(elliptic.P256(), newDeterministicReader(h[:]))
+	reader := hkdf.New(sha256.New, []byte(seed), nil, []byte(label))
+	key, err := ecdsa.GenerateKey(elliptic.P256(), reader)
 	if err != nil {
 		return nil, err
 	}
@@ -256,45 +267,4 @@ func randomSerial() (*big.Int, error) {
 		return nil, fmt.Errorf("pki: generate serial: %w", err)
 	}
 	return serial, nil
-}
-
-// deterministicReader is an io.Reader that expands a 32-byte seed
-// into an arbitrary-length deterministic byte stream using SHA-256 in
-// counter mode. It is used only for key derivation from a seed.
-type deterministicReader struct {
-	seed    [32]byte
-	counter uint64
-	buf     []byte
-}
-
-func newDeterministicReader(seed []byte) *deterministicReader {
-	r := &deterministicReader{}
-	copy(r.seed[:], seed)
-	return r
-}
-
-func (r *deterministicReader) Read(p []byte) (int, error) {
-	n := 0
-	for n < len(p) {
-		if len(r.buf) == 0 {
-			// Expand seed with counter.
-			var block [40]byte
-			copy(block[:32], r.seed[:])
-			block[32] = byte(r.counter >> 56)
-			block[33] = byte(r.counter >> 48)
-			block[34] = byte(r.counter >> 40)
-			block[35] = byte(r.counter >> 32)
-			block[36] = byte(r.counter >> 24)
-			block[37] = byte(r.counter >> 16)
-			block[38] = byte(r.counter >> 8)
-			block[39] = byte(r.counter)
-			h := sha256.Sum256(block[:])
-			r.buf = h[:]
-			r.counter++
-		}
-		copied := copy(p[n:], r.buf)
-		r.buf = r.buf[copied:]
-		n += copied
-	}
-	return n, nil
 }

@@ -147,7 +147,7 @@ func (s *ResourceService) Watch(ctx context.Context, req *pb.WatchRequest, strea
 
 		case event, ok := <-watcher.ResultChan():
 			if !ok {
-				return apierrors.NewServiceUnavailable("watch closed")
+				return k8sErrorToConnectError(apierrors.NewServiceUnavailable("watch closed"))
 			}
 
 			msg, ok := s.processEvent(event)

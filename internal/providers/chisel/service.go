@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"slices"
 	"sync"
+	"sync/atomic"
 
 	chserver "github.com/jpillora/chisel/server"
 
@@ -24,6 +25,11 @@ import (
 // Each cluster is differentiated by its loopback host, not its port.
 const tunnelPort = 16598
 
+// maxHosts is the total number of unique loopback addresses available
+// in the range 127.1.1.1 – 127.254.254.254 (octets 0 and 255 are
+// avoided).
+const maxHosts = 254 * 254 * 254
+
 // clusterEntry holds the per-cluster tunnel state: the allocated
 // loopback host and the chisel user name.
 type clusterEntry struct {
@@ -34,10 +40,10 @@ type clusterEntry struct {
 // Service manages the mapping between cluster names and unique
 // loopback addresses, and provisions chisel users for each agent.
 // It implements core.TunnelProvider and additionally exposes the
-// underlying chisel server via Server() for transport-layer init.
+// underlying chisel server via ServerRef() for transport-layer init.
 type Service struct {
-	server *chserver.Server
-	ca     *pki.CA
+	server atomic.Pointer[chserver.Server]
+	ca     atomic.Pointer[pki.CA]
 	log    *slog.Logger
 
 	mu        sync.RWMutex
@@ -50,7 +56,6 @@ type Service struct {
 // transport layer; see tunnel.NewServer.
 func NewService() *Service {
 	return &Service{
-		server:    &chserver.Server{},
 		log:       slog.Default().With("component", "tunnel-provider"),
 		clusters:  make(map[string]*clusterEntry),
 		usedHosts: make(map[string]struct{}),
@@ -59,29 +64,30 @@ func NewService() *Service {
 
 var _ core.TunnelProvider = (*Service)(nil)
 
-// Server returns the shared chisel server pointer. The tunnel
-// transport writes the fully initialized server into this pointer
-// at startup so both sides share the same instance. This method is
-// intentionally NOT part of core.TunnelProvider to keep the domain
-// layer free of chisel dependencies.
-func (s *Service) Server() *chserver.Server {
-	return s.server
+// ServerRef returns a pointer to the atomic chisel server reference.
+// The tunnel transport stores the fully initialized server into this
+// reference at startup so that both sides share the same instance.
+// This method is intentionally NOT part of core.TunnelProvider to keep
+// the domain layer free of chisel dependencies.
+func (s *Service) ServerRef() *atomic.Pointer[chserver.Server] {
+	return &s.server
 }
 
 // SetCA injects the CA used to sign agent CSRs and to report the CA
 // certificate. This is called during server startup, before any
 // registrations occur.
 func (s *Service) SetCA(ca *pki.CA) {
-	s.ca = ca
+	s.ca.Store(ca)
 }
 
 // CACertPEM returns the PEM-encoded CA certificate so that agents
 // can verify the tunnel server's identity via mTLS.
 func (s *Service) CACertPEM() []byte {
-	if s.ca == nil {
+	ca := s.ca.Load()
+	if ca == nil {
 		return nil
 	}
-	return s.ca.CertPEM()
+	return ca.CertPEM()
 }
 
 // ListClusters returns the names of all currently registered clusters.
@@ -98,44 +104,51 @@ func (s *Service) ListClusters() []string {
 // tunnel endpoint and the PEM-encoded signed certificate.
 //
 // If the cluster was previously registered, the old host allocation
-// is released so that re-registration always moves the cluster to a
-// fresh address.
+// is released first so that re-registration always moves the cluster
+// to a fresh address.
 func (s *Service) RegisterCluster(cluster, agentID string, csrPEM []byte) (string, []byte, error) {
-	if s.ca == nil {
+	ca := s.ca.Load()
+	if ca == nil {
 		return "", nil, fmt.Errorf("CA not initialized")
 	}
 
 	// Sign the agent's CSR with the internal CA.
-	certPEM, err := s.ca.SignCSR(csrPEM)
+	certPEM, err := ca.SignCSR(csrPEM)
 	if err != nil {
 		return "", nil, fmt.Errorf("sign CSR: %w", err)
 	}
 
 	// Derive the chisel password from the signed certificate so
 	// that both server and agent can compute it independently.
-	auth := pki.DeriveAuth(agentID, certPEM)
+	auth, err := pki.DeriveAuth(agentID, certPEM)
+	if err != nil {
+		return "", nil, fmt.Errorf("derive auth: %w", err)
+	}
 	_, pass, _ := parseAuth(auth)
+
+	srv := s.server.Load()
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	// Release the previous host and user for this cluster, if any,
+	// so that stale credentials do not accumulate in chisel.
+	if prev, ok := s.clusters[cluster]; ok {
+		srv.DeleteUser(prev.user)
+		s.releaseHost(prev.host)
+		delete(s.clusters, cluster)
+	}
 
 	host, err := s.allocateHost(cluster)
 	if err != nil {
 		return "", nil, err
 	}
 
-	// Remove the previous user and host for this cluster, if any,
-	// so that stale credentials do not accumulate in chisel.
-	if prev, ok := s.clusters[cluster]; ok {
-		s.server.DeleteUser(prev.user)
-		s.releaseHost(prev.host)
-	}
-
 	// Restrict the user to reverse-tunnelling only the allocated
 	// host:port combination. The regex anchors prevent the agent
 	// from binding arbitrary endpoints.
 	allowed := fmt.Sprintf("^R:%s:%d(:.*)?$", regexp.QuoteMeta(host), tunnelPort)
-	if err := s.server.AddUser(agentID, pass, allowed); err != nil {
+	if err := srv.AddUser(agentID, pass, allowed); err != nil {
 		s.releaseHost(host)
 		return "", nil, err
 	}
@@ -152,6 +165,8 @@ func (s *Service) RegisterCluster(cluster, agentID string, csrPEM []byte) (strin
 // the chisel user and releasing the loopback host. It is a no-op if
 // the cluster is not currently registered.
 func (s *Service) DeregisterCluster(cluster string) {
+	srv := s.server.Load()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -159,7 +174,7 @@ func (s *Service) DeregisterCluster(cluster string) {
 	if !ok {
 		return
 	}
-	s.server.DeleteUser(entry.user)
+	srv.DeleteUser(entry.user)
 	s.releaseHost(entry.host)
 	delete(s.clusters, cluster)
 }
@@ -183,15 +198,15 @@ func (s *Service) ResolveAddress(cluster string) (string, error) {
 // found. Must be called with mu held.
 func (s *Service) allocateHost(cluster string) (string, error) {
 	base := hashKey(cluster)
-	for i := range uint32(1 << 24) {
-		candidate := hostFromIndex(base + i)
+	for i := range uint32(maxHosts) {
+		candidate := hostFromIndex((base + i) % uint32(maxHosts))
 		if _, exists := s.usedHosts[candidate]; exists {
 			continue
 		}
 		s.usedHosts[candidate] = struct{}{}
 		return candidate, nil
 	}
-	return "", fmt.Errorf("failed to allocate loopback host for cluster %s", cluster)
+	return "", fmt.Errorf("exhausted loopback address space (%d hosts)", maxHosts)
 }
 
 // releaseHost returns a previously allocated host to the pool.
@@ -209,14 +224,15 @@ func hashKey(key string) uint32 {
 	return h.Sum32()
 }
 
-// hostFromIndex maps a 32-bit index to a unique loopback address in
-// the range 127.1.1.1 – 127.254.254.254. Octets 0 and 255 are
-// avoided to stay clear of network/broadcast conventions.
-func hostFromIndex(v uint32) string {
-	a := byte((v>>16)%254 + 1)
-	b := byte((v>>8)%254 + 1)
-	c := byte(v%254 + 1)
-	return fmt.Sprintf("127.%d.%d.%d", a, b, c)
+// hostFromIndex maps a linear index (0 – maxHosts-1) to a unique
+// loopback address in the range 127.1.1.1 – 127.254.254.254.
+// Octets 0 and 255 are avoided to stay clear of network/broadcast
+// conventions.
+func hostFromIndex(idx uint32) string {
+	a := idx / (254 * 254)
+	b := (idx / 254) % 254
+	c := idx % 254
+	return fmt.Sprintf("127.%d.%d.%d", a+1, b+1, c+1)
 }
 
 // parseAuth splits a "user:pass" string into its components.

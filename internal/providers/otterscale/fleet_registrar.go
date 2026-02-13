@@ -20,6 +20,7 @@ import (
 // calling the remote fleet service to have it signed, and returning
 // the resulting mTLS materials.
 type fleetRegistrar struct {
+	agentID    string
 	client     *http.Client
 	csrPEM     []byte
 	privateKey []byte // PEM-encoded ECDSA private key
@@ -46,6 +47,7 @@ func NewFleetRegistrar() (core.TunnelConsumer, error) {
 	}
 
 	return &fleetRegistrar{
+		agentID: agentID,
 		client: &http.Client{
 			Timeout: 30 * time.Second,
 		},
@@ -60,15 +62,10 @@ var _ core.TunnelConsumer = (*fleetRegistrar)(nil)
 // CSR. The server signs the CSR with its internal CA and returns the
 // signed certificate, CA certificate, and tunnel endpoint.
 func (f *fleetRegistrar) Register(ctx context.Context, serverURL, cluster string) (core.Registration, error) {
-	agentID, err := os.Hostname()
-	if err != nil {
-		return core.Registration{}, fmt.Errorf("failed to get hostname: %w", err)
-	}
-
 	client := pbconnect.NewFleetServiceClient(f.client, serverURL)
 	req := &pb.RegisterRequest{}
 	req.SetCluster(cluster)
-	req.SetAgentId(agentID)
+	req.SetAgentId(f.agentID)
 	req.SetCsr(f.csrPEM)
 
 	resp, err := client.Register(ctx, req)
@@ -80,6 +77,7 @@ func (f *fleetRegistrar) Register(ctx context.Context, serverURL, cluster string
 		Endpoint:      resp.GetEndpoint(),
 		Certificate:   resp.GetCertificate(),
 		CACertificate: resp.GetCaCertificate(),
+		AgentID:       f.agentID,
 	}, nil
 }
 
