@@ -6,6 +6,7 @@ import (
 	"github.com/google/wire"
 	"github.com/otterscale/otterscale-agent/internal/app"
 	"github.com/otterscale/otterscale-agent/internal/cmd"
+	"github.com/otterscale/otterscale-agent/internal/cmd/agent"
 	"github.com/otterscale/otterscale-agent/internal/cmd/server"
 	"github.com/otterscale/otterscale-agent/internal/config"
 	"github.com/otterscale/otterscale-agent/internal/core"
@@ -21,6 +22,6 @@ func wireServer() (*server.Server, func(), error) {
 	panic(wire.Build(cmd.ProviderSet, app.ProviderSet, core.ProviderSet, providers.ProviderSet))
 }
 
-// func wireAgent() (*cmd.Agent, func(), error) {
-// 	panic(wire.Build(cmd.NewAgent, mux.ProviderSet, app.ProviderSet, core.ProviderSet, providers.ProviderSet))
-// }
+func wireAgent() (*agent.Agent, func(), error) {
+	panic(wire.Build(cmd.ProviderSet))
+}

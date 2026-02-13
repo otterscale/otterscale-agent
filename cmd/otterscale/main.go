@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/otterscale/otterscale-agent/internal/cmd"
+	"github.com/otterscale/otterscale-agent/internal/cmd/agent"
 	"github.com/otterscale/otterscale-agent/internal/cmd/server"
 	"github.com/otterscale/otterscale-agent/internal/config"
 )
@@ -60,14 +61,9 @@ func newCmd(conf *config.Config) (*cobra.Command, error) {
 		return nil, err
 	}
 
-	// agentCmd, err := cmd.NewAgentCommand(conf, func() (*cmd.Agent, func(), error) {
-	// 	return wireAgent()
-	// })
-	// if err != nil {
-	// 	return nil, err
-	// }
-
-	agentCmd, err := cmd.NewAgentCommand(conf)
+	agentCmd, err := cmd.NewAgentCommand(conf, func() (*agent.Agent, func(), error) {
+		return wireAgent()
+	})
 	if err != nil {
 		return nil, err
 	}

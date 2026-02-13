@@ -8,6 +8,7 @@ package main
 
 import (
 	"github.com/otterscale/otterscale-agent/internal/app"
+	"github.com/otterscale/otterscale-agent/internal/cmd/agent"
 	"github.com/otterscale/otterscale-agent/internal/cmd/server"
 	"github.com/otterscale/otterscale-agent/internal/config"
 	"github.com/otterscale/otterscale-agent/internal/core"
@@ -43,5 +44,11 @@ func wireServer() (*server.Server, func(), error) {
 	handler := server.NewHandler(fleetService, resourceService)
 	serverServer := server.NewServer(handler, tunnelProvider)
 	return serverServer, func() {
+	}, nil
+}
+
+func wireAgent() (*agent.Agent, func(), error) {
+	agentAgent := agent.NewAgent()
+	return agentAgent, func() {
 	}, nil
 }
