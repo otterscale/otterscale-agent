@@ -29,7 +29,7 @@ flowchart LR
 ## Features
 
 - **Multi-cluster** -- manage any number of Kubernetes clusters from one endpoint.
-- **Dynamic registration** -- agents register on connect; no static per-cluster config on the server.
+- **Dynamic registration** -- agents register on connect via CSR-based mTLS enrolment; no static per-cluster config on the server.
 - **OIDC authentication** -- bearer tokens verified against Keycloak; identity forwarded via Kubernetes impersonation.
 - **Full resource lifecycle** -- Discovery, Schema, List, Get, Create, Apply (SSA), Delete, Watch (streaming).
 - **Observability** -- OpenTelemetry tracing, Prometheus metrics at `/metrics`, gRPC health checks.
@@ -55,6 +55,7 @@ go build -o otterscale ./cmd/otterscale
   --address=:8299 \
   --tunnel-address=127.0.0.1:8300 \
   --tunnel-key-seed=my-secret-seed \
+  --allowed-origins=https://dashboard.example.com \
   --keycloak-realm-url=https://keycloak.example.com/realms/otterscale \
   --keycloak-client-id=otterscale
 ```
@@ -84,9 +85,9 @@ Values are resolved in this order (highest wins):
 | Flag | Env | Default | Description |
 |------|-----|---------|-------------|
 | `--address` | `OTTERSCALE_SERVER_ADDRESS` | `:8299` | HTTP listen address |
-| `--allowed-origins` | `OTTERSCALE_SERVER_ALLOWED_ORIGINS` | `[]` | CORS allowed origins |
+| `--allowed-origins` | `OTTERSCALE_SERVER_ALLOWED_ORIGINS` | *(required)* | CORS allowed origins (must be set in server mode) |
 | `--tunnel-address` | `OTTERSCALE_SERVER_TUNNEL_ADDRESS` | `127.0.0.1:8300` | Chisel tunnel listen address |
-| `--tunnel-key-seed` | `OTTERSCALE_SERVER_TUNNEL_KEY_SEED` | `change-me` | Deterministic key seed for tunnel TLS |
+| `--tunnel-key-seed` | `OTTERSCALE_SERVER_TUNNEL_KEY_SEED` | `change-me` | Deterministic key seed for tunnel CA (HKDF + P-256) |
 | `--keycloak-realm-url` | `OTTERSCALE_SERVER_KEYCLOAK_REALM_URL` | | Keycloak OIDC issuer URL |
 | `--keycloak-client-id` | `OTTERSCALE_SERVER_KEYCLOAK_CLIENT_ID` | `otterscale` | Expected `aud` claim |
 
@@ -128,15 +129,16 @@ test/
 ### How it works
 
 1. The **server** starts an HTTP server (ConnectRPC) and a Chisel tunnel listener.
-2. An **agent** calls `FleetService.Register` to obtain a tunnel endpoint, TLS fingerprint, and one-time token.
-3. The agent opens a Chisel reverse tunnel, exposing its local Kubernetes API proxy to the server via a unique loopback address (e.g. `127.42.1.1:16598`).
+2. An **agent** calls `FleetService.Register` with a CSR. The server signs it with the internal CA and returns the signed certificate, CA certificate, and tunnel endpoint.
+3. The agent opens a mTLS Chisel reverse tunnel using the signed certificate, exposing its local Kubernetes API proxy to the server via a unique loopback address (e.g. `127.42.1.1:16598`). Each cluster gets a distinct address in the `127.0.0.0/8` range (up to ~16M clusters).
 4. When a user calls `ResourceService.List` (or any resource RPC), the server resolves the cluster to its loopback address and proxies the request through the tunnel. The agent impersonates the authenticated user against the real kube-apiserver.
 
 ### Security model
 
 - **User -> Server**: OIDC bearer token verified against Keycloak. Unauthenticated paths: health, reflection, fleet registration.
-- **Server -> Agent**: requests forwarded through the Chisel tunnel with Kubernetes impersonation headers carrying the verified user identity.
-- **Agent -> kube-apiserver**: in-cluster service account with impersonation privileges. RBAC is enforced by the target cluster.
+- **Server -> Agent**: mTLS tunnel — the server runs an internal CA (deterministic from `--tunnel-key-seed`) that signs agent CSRs. Tunnel credentials are derived from the signed certificate so both sides can compute them independently. Key derivation uses HKDF (RFC 5869) with P-256 ECDSA keys.
+- **Agent -> kube-apiserver**: in-cluster service account with impersonation privileges. Requests carry the authenticated user's identity via Kubernetes impersonation headers. RBAC is enforced by the target cluster.
+- **CORS**: in server mode, `--allowed-origins` must be explicitly configured — the server refuses to start without it to prevent accidental open-origin exposure in production.
 
 ## API
 
