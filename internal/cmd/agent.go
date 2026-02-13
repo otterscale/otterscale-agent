@@ -1,9 +1,7 @@
 package cmd
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net"
@@ -11,13 +9,15 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
-	"strings"
 
 	chclient "github.com/jpillora/chisel/client"
 	"github.com/otterscale/otterscale-agent/internal/config"
 	"github.com/spf13/cobra"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+
+	pb "github.com/otterscale/otterscale-agent/api/fleet/v1"
+	"github.com/otterscale/otterscale-agent/api/fleet/v1/pbconnect"
 )
 
 // TODO: refactor to domain-driven architecture
@@ -25,7 +25,7 @@ func NewAgentCommand(conf *config.Config) (*cobra.Command, error) {
 	cmd := &cobra.Command{
 		Use:     "agent",
 		Short:   "Start agent that connects to server and executes requests in-cluster",
-		Example: "otterscale agent --cluster=default --tunnel-server-url=https://server.otterscale.io --tunnel-auth=user:pass --tunnel-fingerprint=... --tunnel-port=16598",
+		Example: "otterscale agent --cluster=default --server-url=https://api.otterscale.io --tunnel-server-url=https://tunnel.otterscale.io",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runAgent(cmd.Context(), conf)
 		},
@@ -40,10 +40,7 @@ func NewAgentCommand(conf *config.Config) (*cobra.Command, error) {
 
 // runAgent contains the main execution logic for the agent.
 func runAgent(ctx context.Context, conf *config.Config) error {
-	var (
-		serverURL  = conf.AgentTunnelServerURL()
-		tunnelPort = conf.AgentTunnelPort()
-	)
+	serverURL := conf.AgentTunnelServerURL()
 
 	// 1. Prepare the reverse proxy for the Kubernetes API Server.
 	k8sProxy, err := newKubeAPIProxy()
@@ -51,13 +48,16 @@ func runAgent(ctx context.Context, conf *config.Config) error {
 		return fmt.Errorf("failed to create k8s proxy: %w", err)
 	}
 
-	// 2. Register this agent with the server (obtains the fingerprint dynamically).
-	// fingerprint, err := registerWithServer(conf)
-	// if err != nil {
-	// 	return fmt.Errorf("failed to register with server: %w", err)
-	// }
-	fingerprint := conf.AgentTunnelFingerprint()
-	slog.Info("Registered with server", "fingerprint", fingerprint)
+	// 2. Register this agent with the control plane and receive tunnel credentials.
+	reg, err := registerWithServer(ctx, conf)
+	if err != nil {
+		return fmt.Errorf("failed to register with server: %w", err)
+	}
+	slog.Info(
+		"Registered with server",
+		"fingerprint", reg.Fingerprint,
+		"endpoint", reg.Endpoint,
+	)
 
 	// 3. Listen on a random local port (target for the tunnel).
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -67,7 +67,7 @@ func runAgent(ctx context.Context, conf *config.Config) error {
 	localProxyPort := listener.Addr().(*net.TCPAddr).Port
 
 	// 4. Prepare the Chisel Reverse Tunnel Client.
-	tunnelClient, err := newTunnelClient(conf, localProxyPort, fingerprint)
+	tunnelClient, err := newTunnelClient(conf, localProxyPort, reg)
 	if err != nil {
 		return fmt.Errorf("failed to create tunnel client: %w", err)
 	}
@@ -86,7 +86,11 @@ func runAgent(ctx context.Context, conf *config.Config) error {
 
 	// Goroutine: Run the Chisel Agent connection.
 	go func() {
-		slog.Info("Agent connecting to server", "server", serverURL, "tunnelPort", tunnelPort)
+		slog.Info(
+			"Agent connecting to server",
+			"server", serverURL,
+			"endpoint", reg.Endpoint,
+		)
 		if err := tunnelClient.Start(ctx); err != nil {
 			errChan <- fmt.Errorf("agent failed to start: %w", err)
 			return
@@ -111,33 +115,31 @@ func runAgent(ctx context.Context, conf *config.Config) error {
 // newTunnelClient creates a Chisel Client instance.
 // The fingerprint is obtained dynamically from the registration response.
 // If the agent has a statically-configured fingerprint, it takes precedence.
-func newTunnelClient(conf *config.Config, localPort int, registeredFingerprint string) (*chclient.Client, error) {
+func newTunnelClient(conf *config.Config, localPort int, reg registrationResult) (*chclient.Client, error) {
 	var (
-		cluster    = conf.AgentCluster()
-		serverURL  = conf.AgentTunnelServerURL()
-		auth       = conf.AgentTunnelAuth()
-		tunnelPort = conf.AgentTunnelPort()
-		timeout    = conf.AgentTunnelTimeout()
+		cluster   = conf.AgentCluster()
+		serverURL = conf.AgentTunnelServerURL()
+		timeout   = conf.AgentTunnelTimeout()
 	)
 
 	// Prefer static config fingerprint if set; otherwise use the one from registration.
 	fingerprint := conf.AgentTunnelFingerprint()
 	if fingerprint == "" {
-		fingerprint = registeredFingerprint
+		fingerprint = reg.Fingerprint
 	}
 
 	if fingerprint == "" {
 		return nil, fmt.Errorf("fingerprint is required")
 	}
 
-	hostname, err := os.Hostname()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get hostname: %w", err)
+	auth := conf.AgentTunnelAuth()
+	if reg.Auth != "" {
+		auth = reg.Auth
 	}
 
 	headers := http.Header{}
 	headers.Set("X-Cluster", cluster)
-	headers.Set("X-Agent-ID", hostname) // Usually the Pod Name
+	headers.Set("X-Agent-ID", reg.AgentID) // Usually the Pod Name
 
 	chiselConfig := &chclient.Config{
 		Server:      serverURL,
@@ -145,8 +147,8 @@ func newTunnelClient(conf *config.Config, localPort int, registeredFingerprint s
 		Fingerprint: fingerprint,
 		Headers:     headers,
 		Remotes: []string{
-			// Forward traffic from the remote TunnelPort to the local port.
-			fmt.Sprintf("R:127.0.0.1:%d:127.0.0.1:%d", tunnelPort, localPort),
+			// Forward traffic from the server-assigned tunnel endpoint to the local port.
+			fmt.Sprintf("R:%s:127.0.0.1:%d", reg.Endpoint, localPort),
 		},
 		KeepAlive:     timeout,
 		MaxRetryCount: -1, // Infinite retries
@@ -155,53 +157,45 @@ func newTunnelClient(conf *config.Config, localPort int, registeredFingerprint s
 	return chclient.NewClient(chiselConfig)
 }
 
-// registerWithServer sends a registration request to the tunnel server so
-// the server creates the chisel user and port mapping for this cluster.
-// Returns the server fingerprint for tunnel verification.
-func registerWithServer(conf *config.Config) (string, error) {
-	serverURL := conf.AgentTunnelServerURL()
-	auth := conf.AgentTunnelAuth() // "user:pass"
+type registrationResult struct {
+	AgentID     string
+	Auth        string
+	Fingerprint string
+	Endpoint    string
+}
+
+// registerWithServer calls FleetService.Register and returns tunnel credentials.
+func registerWithServer(ctx context.Context, conf *config.Config) (registrationResult, error) {
+	serverURL := conf.AgentServerURL()
 	cluster := conf.AgentCluster()
-	tunnelPort := conf.AgentTunnelPort()
-
-	body, err := json.Marshal(map[string]any{
-		"cluster":     cluster,
-		"tunnel_port": tunnelPort,
-	})
+	agentID, err := os.Hostname()
 	if err != nil {
-		return "", fmt.Errorf("failed to marshal registration body: %w", err)
+		return registrationResult{}, fmt.Errorf("failed to get hostname: %w", err)
 	}
 
-	req, err := http.NewRequest(http.MethodPost, serverURL+"/v1/register", bytes.NewReader(body))
+	client := pbconnect.NewFleetServiceClient(http.DefaultClient, serverURL)
+	req := &pb.RegisterRequest{}
+	req.SetCluster(cluster)
+	req.SetAgentId(agentID)
+
+	resp, err := client.Register(ctx, req)
 	if err != nil {
-		return "", fmt.Errorf("failed to create registration request: %w", err)
+		return registrationResult{}, err
 	}
 
-	parts := strings.SplitN(auth, ":", 2)
-	if len(parts) != 2 {
-		return "", fmt.Errorf("invalid tunnel auth format, expected user:pass")
-	}
-	req.SetBasicAuth(parts[0], parts[1])
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("registration request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("registration failed with status %d", resp.StatusCode)
+	endpoint := resp.GetEndpoint()
+	if endpoint == "" {
+		return registrationResult{}, fmt.Errorf("endpoint is required")
 	}
 
-	var result struct {
-		Fingerprint string `json:"fingerprint"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", fmt.Errorf("failed to decode registration response: %w", err)
+	reg := registrationResult{
+		AgentID:     agentID,
+		Auth:        fmt.Sprintf("%s:%s", agentID, resp.GetToken()),
+		Fingerprint: resp.GetFingerprint(),
+		Endpoint:    endpoint,
 	}
 
-	return result.Fingerprint, nil
+	return reg, nil
 }
 
 // newKubeAPIProxy creates a reverse proxy pointing to the in-cluster API Server.
@@ -233,25 +227,6 @@ func newKubeAPIProxy() (*httputil.ReverseProxy, error) {
 		// automatically injects the latest token from BearerTokenFile.
 	}
 	proxy.Transport = transport
-
-	return proxy, nil
-}
-
-// newKubeAPIProxyFromURL creates a simple reverse proxy to an explicit URL.
-// This is used in integration tests where rest.InClusterConfig is unavailable
-// and the target is a fake K8s API server.
-func newKubeAPIProxyFromURL(rawURL string) (*httputil.ReverseProxy, error) {
-	target, err := url.Parse(rawURL)
-	if err != nil {
-		return nil, fmt.Errorf("invalid kube-api-url: %w", err)
-	}
-
-	proxy := httputil.NewSingleHostReverseProxy(target)
-	proxy.Director = func(req *http.Request) {
-		req.URL.Scheme = target.Scheme
-		req.URL.Host = target.Host
-		req.Host = target.Host
-	}
 
 	return proxy, nil
 }

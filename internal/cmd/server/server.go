@@ -8,7 +8,6 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/otterscale/otterscale-agent/internal/core"
-	"github.com/otterscale/otterscale-agent/internal/middleware"
 	"github.com/otterscale/otterscale-agent/internal/transport"
 	"github.com/otterscale/otterscale-agent/internal/transport/http"
 	"github.com/otterscale/otterscale-agent/internal/transport/tunnel"
@@ -33,15 +32,15 @@ func NewServer(handler *Handler, tunnel core.TunnelProvider) *Server {
 }
 
 func (s *Server) Run(ctx context.Context, cfg Config) error {
-	oidc, err := middleware.NewOIDC(cfg.KeycloakRealmURL, cfg.KeycloakClientID)
-	if err != nil {
-		return fmt.Errorf("failed to create OIDC middleware: %w", err)
-	}
+	// oidc, err := middleware.NewOIDC(cfg.KeycloakRealmURL, cfg.KeycloakClientID)
+	// if err != nil {
+	// 	return fmt.Errorf("failed to create OIDC middleware: %w", err)
+	// }
 
 	httpSrv, err := http.NewServer(
 		http.WithAddress(cfg.Address),
 		http.WithAllowedOrigins(cfg.AllowedOrigins),
-		http.WithAuthMiddleware(oidc),
+		// http.WithAuthMiddleware(oidc),
 		http.WithMount(s.handler.Mount),
 	)
 	if err != nil {

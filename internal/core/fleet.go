@@ -24,15 +24,12 @@ func NewFleetUseCase(tunnel TunnelProvider) *FleetUseCase {
 	}
 }
 
-func (uc *FleetUseCase) RegisterCluster(cluster, agentID string) (host, token string, err error) {
+func (uc *FleetUseCase) RegisterCluster(cluster, agentID string) (endpoint, token string, err error) {
 	token, err = uc.generateToken()
 	if err != nil {
 		return
 	}
-	host, err = uc.tunnel.RegisterCluster(cluster, agentID, token)
-	if err != nil {
-		return
-	}
+	endpoint, err = uc.tunnel.RegisterCluster(cluster, agentID, token)
 	return
 }
 
