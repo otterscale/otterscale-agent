@@ -56,7 +56,7 @@ func (s *Server) Run(ctx context.Context, cfg Config) error {
 	tunnelSrv, err := tunnel.NewServer(
 		tunnel.WithAddress(cfg.TunnelAddress),
 		tunnel.WithKeySeed(cfg.TunnelKeySeed),
-		tunnel.WithServer(s.tunnel.Server),
+		tunnel.WithServer(s.tunnel.Server()),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create tunnel server: %w", err)

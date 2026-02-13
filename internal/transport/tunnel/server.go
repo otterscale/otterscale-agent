@@ -2,6 +2,7 @@ package tunnel
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net"
 
@@ -9,91 +10,106 @@ import (
 	chserver "github.com/jpillora/chisel/server"
 )
 
-// ServerFunc is a function that returns a existing chisel server.
-type ServerFunc func() *chserver.Server
-
-// Option defines a functional option for configuring the tunnel.
+// ServerOption configures a Server.
 type ServerOption func(*Server)
 
+// Server manages a chisel reverse-tunnel listener with TLS fingerprint
+// authentication and automatic user provisioning.
 type Server struct {
-	*chserver.Server
+	inner   *chserver.Server // shared pointer; see WithServer
 	address string
 	keySeed string
+	log     *slog.Logger
 }
 
-// WithAddress configures the tunnel address.
+// WithAddress configures the listen address (e.g. ":8300").
 func WithAddress(address string) ServerOption {
-	return func(o *Server) {
-		o.address = address
-	}
+	return func(s *Server) { s.address = address }
 }
 
-// WithKeySeed configures the tunnel key seed.
+// WithKeySeed configures the deterministic key seed for the tunnel server.
 func WithKeySeed(keySeed string) ServerOption {
-	return func(o *Server) {
-		o.keySeed = keySeed
-	}
+	return func(s *Server) { s.keySeed = keySeed }
 }
 
-// WithServer configures the tunnel server.
-func WithServer(server ServerFunc) ServerOption {
-	return func(o *Server) {
-		o.Server = server()
-	}
+// WithServer injects a shared chisel server pointer. The pointer is
+// typically owned by a TunnelProvider; Start will initialize it in place
+// so that both sides share the same running server instance.
+func WithServer(srv *chserver.Server) ServerOption {
+	return func(s *Server) { s.inner = srv }
 }
 
-// NewServer creates a new tunnel server with the given options.
+// WithServerLogger configures a structured logger. Defaults to
+// slog.Default with a "component" attribute.
+func WithServerLogger(log *slog.Logger) ServerOption {
+	return func(s *Server) { s.log = log }
+}
+
+// NewServer creates a tunnel server. The underlying chisel server is
+// fully initialized so that AddUser (via TunnelProvider) works
+// immediately, even before Start is called.
 func NewServer(opts ...ServerOption) (*Server, error) {
-	srv := &Server{
+	s := &Server{
+		inner:   &chserver.Server{},
 		address: ":8300",
-		Server:  &chserver.Server{},
 	}
 	for _, opt := range opts {
-		opt(srv)
+		opt(s)
 	}
-	return srv, nil
+	if s.log == nil {
+		s.log = slog.Default().With("component", "tunnel-server")
+	}
+	if err := s.init(); err != nil {
+		return nil, fmt.Errorf("tunnel server init: %w", err)
+	}
+	return s, nil
 }
 
-// Start starts the tunnel server and blocks until the context is canceled.
+// Start begins accepting connections and blocks until ctx is cancelled.
 func (s *Server) Start(ctx context.Context) error {
-	cfg := &chserver.Config{
-		Reverse: true,
-		KeySeed: s.keySeed,
-	}
-
-	chServer, err := chserver.NewServer(cfg)
-	if err != nil {
-		return err
-	}
-
-	// if no users exist, chisel will allow anyone to connect.
-	disabledUser, disabledPass := uuid.NewString(), uuid.NewString()
-	if err := chServer.AddUser(disabledUser, disabledPass, "127.0.0.1"); err != nil {
-		return err
-	}
-
-	// replace the lazy initialized server
-	*s.Server = *chServer
-
 	host, port, err := net.SplitHostPort(s.address)
 	if err != nil {
-		return err
+		return fmt.Errorf("parse address %q: %w", s.address, err)
 	}
 
-	slog.Info("Tunnel server starting on", "address", s.address)
+	s.log.Info("starting", "address", s.address)
 
-	if err := s.StartContext(ctx, host, port); err != nil {
-		return err
+	if err := s.inner.StartContext(ctx, host, port); err != nil {
+		return fmt.Errorf("tunnel server start: %w", err)
 	}
 
-	return s.Wait()
+	return s.inner.Wait()
 }
 
-// Stop stops the tunnel server gracefully.
-func (s *Server) Stop(ctx context.Context) error {
-	if s.Server == nil {
+// Stop gracefully shuts down the tunnel server.
+func (s *Server) Stop(_ context.Context) error {
+	if s.inner == nil {
 		return nil
 	}
-	slog.Info("Gracefully shutting down tunnel server...")
-	return s.Close()
+	s.log.Info("shutting down")
+	return s.inner.Close()
+}
+
+// init creates the real chisel server and copies it into the shared
+// pointer so that any TunnelProvider holding the same reference sees
+// the fully initialized instance.
+func (s *Server) init() error {
+	ch, err := chserver.NewServer(&chserver.Config{
+		Reverse: true,
+		KeySeed: s.keySeed,
+	})
+	if err != nil {
+		return err
+	}
+
+	// Chisel allows anonymous connections when no users exist.
+	// Add a disabled sentinel user to enforce authentication.
+	if err := ch.AddUser(uuid.NewString(), uuid.NewString(), "127.0.0.1"); err != nil {
+		return err
+	}
+
+	// Copy into the shared pointer so the TunnelProvider sees the
+	// initialized server.
+	*s.inner = *ch
+	return nil
 }

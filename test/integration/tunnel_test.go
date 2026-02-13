@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -127,12 +128,12 @@ func initTunnelServer(t *testing.T, tunnel core.TunnelProvider) {
 	t.Helper()
 	srv, err := tunneltransport.NewServer(
 		tunneltransport.WithKeySeed("test-seed"),
-		tunneltransport.WithServer(tunnel.Server),
+		tunneltransport.WithServer(tunnel.Server()),
 	)
 	if err != nil {
 		t.Fatalf("init tunnel server: %v", err)
 	}
 	t.Cleanup(func() {
-		_ = srv.Close()
+		_ = srv.Stop(context.Background())
 	})
 }

@@ -42,7 +42,7 @@ func (a *Agent) Run(ctx context.Context, cfg Config) error {
 		return fmt.Errorf("failed to create HTTP server: %w", err)
 	}
 
-	tunnelClt, err := tunnel.NewClient(ctx,
+	tunnelClt, err := tunnel.NewClient(
 		tunnel.WithServerURL(cfg.ServerURL),
 		tunnel.WithCluster(cfg.Cluster),
 		tunnel.WithLocalPort(port),
