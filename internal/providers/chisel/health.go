@@ -2,7 +2,6 @@ package chisel
 
 import (
 	"context"
-	"maps"
 	"net"
 	"strconv"
 	"time"
@@ -27,7 +26,12 @@ const (
 func (s *Service) clusterSnapshot() map[string]string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return maps.Clone(s.clusterHosts)
+
+	snapshot := make(map[string]string, len(s.clusters))
+	for name, entry := range s.clusters {
+		snapshot[name] = entry.host
+	}
+	return snapshot
 }
 
 // RunHealthCheck periodically probes every registered cluster's

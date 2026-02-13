@@ -8,18 +8,31 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"sync/atomic"
 
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+
+	"github.com/otterscale/otterscale-agent/internal/core"
 )
 
 // Handler sets up the HTTP routes served by the agent. Its sole route
-// is a reverse proxy to the local Kubernetes API server.
-type Handler struct{}
+// is a reverse proxy to the local Kubernetes API server, protected by
+// proxy-token authentication so that only requests arriving through
+// the tunnel are accepted.
+type Handler struct {
+	proxyToken atomic.Pointer[string]
+}
 
 // NewHandler returns a new agent Handler.
 func NewHandler() *Handler {
 	return &Handler{}
+}
+
+// SetProxyToken updates the proxy token used to authenticate incoming
+// requests. It is called after every successful tunnel registration.
+func (h *Handler) SetProxyToken(token string) {
+	h.proxyToken.Store(&token)
 }
 
 // Mount registers a catch-all reverse proxy to the Kubernetes API
@@ -51,8 +64,28 @@ func (h *Handler) Mount(mux *http.ServeMux) error {
 	}
 	proxy.Transport = transport
 
-	mux.Handle("/", proxy)
+	mux.Handle("/", h.requireProxyToken(proxy))
 	return nil
+}
+
+// requireProxyToken returns middleware that validates the proxy token
+// header on every request. It rejects requests that do not carry a
+// valid token and strips the header before forwarding to prevent it
+// from leaking to the upstream Kubernetes API server.
+func (h *Handler) requireProxyToken(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		expected := h.proxyToken.Load()
+		if expected == nil || *expected == "" {
+			http.Error(w, "proxy not ready", http.StatusServiceUnavailable)
+			return
+		}
+		if r.Header.Get(core.ProxyTokenHeader) != *expected {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		r.Header.Del(core.ProxyTokenHeader)
+		next.ServeHTTP(w, r)
+	})
 }
 
 // newKubeConfig loads the Kubernetes client configuration. It first

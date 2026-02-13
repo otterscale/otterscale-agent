@@ -59,7 +59,7 @@ func (a *Agent) Run(ctx context.Context, cfg Config) error {
 		tunnel.WithKeepAlive(cfg.TunnelTimeout),
 		tunnel.WithMaxRetryCount(6),
 		tunnel.WithMaxRetryInterval(10*time.Second),
-		tunnel.WithRegister(a.tunnel.Register),
+		tunnel.WithRegister(a.register()),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create tunnel client: %w", err)
@@ -77,4 +77,18 @@ func (a *Agent) findFreePort() (int, error) {
 	port := listener.Addr().(*net.TCPAddr).Port
 	listener.Close()
 	return port, nil
+}
+
+// register wraps the register callback so that the proxy token returned
+// by the fleet server is forwarded to the handler's middleware
+// after every successful registration or re-registration.
+func (a *Agent) register() tunnel.RegisterFunc {
+	return func(ctx context.Context, serverURL, cluster string) (endpoint, fingerprint, auth string, err error) {
+		reg, err := a.tunnel.Register(ctx, serverURL, cluster)
+		if err != nil {
+			return "", "", "", err
+		}
+		a.handler.SetProxyToken(reg.ProxyToken)
+		return reg.Endpoint, reg.Fingerprint, reg.Auth, nil
+	}
 }

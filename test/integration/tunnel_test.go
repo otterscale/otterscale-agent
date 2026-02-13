@@ -15,27 +15,27 @@ func TestFleetRegisterClusterUsesSingleSharedTunnelPort(t *testing.T) {
 	initTunnelServer(t, tunnel)
 	fleet := core.NewFleetUseCase(tunnel)
 
-	endpointA, tokenA, err := fleet.RegisterCluster("cluster-a", "agent-a")
+	regA, err := fleet.RegisterCluster("cluster-a", "agent-a")
 	if err != nil {
 		t.Fatalf("register cluster-a: %v", err)
 	}
-	endpointB, tokenB, err := fleet.RegisterCluster("cluster-b", "agent-b")
+	regB, err := fleet.RegisterCluster("cluster-b", "agent-b")
 	if err != nil {
 		t.Fatalf("register cluster-b: %v", err)
 	}
 
-	if tokenA == "" || tokenB == "" {
-		t.Fatalf("expected non-empty tokens, got tokenA=%q tokenB=%q", tokenA, tokenB)
+	if regA.Auth == "" || regB.Auth == "" {
+		t.Fatalf("expected non-empty tokens, got tokenA=%q tokenB=%q", regA.Auth, regB.Auth)
 	}
-	if tokenA == tokenB {
+	if regA.Auth == regB.Auth {
 		t.Fatal("expected unique tokens per registration")
 	}
 
-	if endpointA == "" || endpointB == "" {
-		t.Fatalf("expected non-empty tunnel endpoints, got endpointA=%q endpointB=%q", endpointA, endpointB)
+	if regA.Endpoint == "" || regB.Endpoint == "" {
+		t.Fatalf("expected non-empty tunnel endpoints, got endpointA=%q endpointB=%q", regA.Endpoint, regB.Endpoint)
 	}
-	if endpointA == endpointB {
-		t.Fatalf("expected distinct endpoints for different clusters, got %q", endpointA)
+	if regA.Endpoint == regB.Endpoint {
+		t.Fatalf("expected distinct endpoints for different clusters, got %q", regA.Endpoint)
 	}
 
 	addrA, err := tunnel.ResolveAddress("cluster-a")
@@ -57,25 +57,25 @@ func TestFleetRegisterClusterLatestAgentWinsForSameCluster(t *testing.T) {
 	initTunnelServer(t, tunnel)
 	fleet := core.NewFleetUseCase(tunnel)
 
-	endpoint1, _, err := fleet.RegisterCluster("cluster-r", "agent-r-1")
+	reg1, err := fleet.RegisterCluster("cluster-r", "agent-r-1")
 	if err != nil {
 		t.Fatalf("register agent-r-1: %v", err)
 	}
-	endpoint2, _, err := fleet.RegisterCluster("cluster-r", "agent-r-2")
+	reg2, err := fleet.RegisterCluster("cluster-r", "agent-r-2")
 	if err != nil {
 		t.Fatalf("register agent-r-2: %v", err)
 	}
 
-	if endpoint1 == endpoint2 {
-		t.Fatalf("expected route to move to a new endpoint, got %q", endpoint1)
+	if reg1.Endpoint == reg2.Endpoint {
+		t.Fatalf("expected route to move to a new endpoint, got %q", reg1.Endpoint)
 	}
 
 	addr, err := tunnel.ResolveAddress("cluster-r")
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
-	if addr != "http://"+endpoint2 {
-		t.Fatalf("expected resolve to use latest agent endpoint %q, got %q", endpoint2, addr)
+	if addr != "http://"+reg2.Endpoint {
+		t.Fatalf("expected resolve to use latest agent endpoint %q, got %q", reg2.Endpoint, addr)
 	}
 }
 
@@ -84,32 +84,32 @@ func TestFleetRegisterClusterReregisterAndReplaceAcrossAgents(t *testing.T) {
 	initTunnelServer(t, tunnel)
 	fleet := core.NewFleetUseCase(tunnel)
 
-	endpointA1, tokenA1, err := fleet.RegisterCluster("cluster-z", "agent-a")
+	regA1, err := fleet.RegisterCluster("cluster-z", "agent-a")
 	if err != nil {
 		t.Fatalf("register agent-a #1: %v", err)
 	}
-	endpointB, _, err := fleet.RegisterCluster("cluster-z", "agent-b")
+	regB, err := fleet.RegisterCluster("cluster-z", "agent-b")
 	if err != nil {
 		t.Fatalf("register agent-b: %v", err)
 	}
-	if endpointA1 == endpointB {
-		t.Fatalf("expected agent-b to replace route endpoint, got same endpoint %q", endpointA1)
+	if regA1.Endpoint == regB.Endpoint {
+		t.Fatalf("expected agent-b to replace route endpoint, got same endpoint %q", regA1.Endpoint)
 	}
 
 	addrB, err := tunnel.ResolveAddress("cluster-z")
 	if err != nil {
 		t.Fatalf("resolve after agent-b register: %v", err)
 	}
-	if addrB != "http://"+endpointB {
-		t.Fatalf("expected resolve to point to agent-b endpoint %q, got %q", endpointB, addrB)
+	if addrB != "http://"+regB.Endpoint {
+		t.Fatalf("expected resolve to point to agent-b endpoint %q, got %q", regB.Endpoint, addrB)
 	}
 
-	endpointA2, tokenA2, err := fleet.RegisterCluster("cluster-z", "agent-a")
+	regA2, err := fleet.RegisterCluster("cluster-z", "agent-a")
 	if err != nil {
 		t.Fatalf("register agent-a #2: %v", err)
 	}
 
-	if tokenA1 == tokenA2 {
+	if regA1.Auth == regA2.Auth {
 		t.Fatal("expected token rotation for same agent re-register")
 	}
 
@@ -118,7 +118,7 @@ func TestFleetRegisterClusterReregisterAndReplaceAcrossAgents(t *testing.T) {
 		if err != nil {
 			t.Fatalf("resolve #%d: %v", i+1, err)
 		}
-		if addr != "http://"+endpointA2 {
+		if addr != "http://"+regA2.Endpoint {
 			t.Fatalf("expected only re-registered route to be selected, got %q", addr)
 		}
 	}

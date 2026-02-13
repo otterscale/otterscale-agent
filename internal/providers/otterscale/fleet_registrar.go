@@ -36,12 +36,13 @@ var _ core.TunnelConsumer = (*fleetRegistrar)(nil)
 
 // Register calls the fleet service's Register RPC with the local
 // hostname as the agent ID. It returns the tunnel endpoint, the
-// server's TLS fingerprint, and an auth string in "agentID:token"
-// format that the chisel client uses for authentication.
-func (f *fleetRegistrar) Register(ctx context.Context, serverURL, cluster string) (endpoint, fingerprint, auth string, err error) {
+// server's TLS fingerprint, an auth string in "agentID:token" format
+// that the chisel client uses for authentication, and a proxy token
+// for HTTP-level authentication of tunnelled requests.
+func (f *fleetRegistrar) Register(ctx context.Context, serverURL, cluster string) (core.Registration, error) {
 	agentID, err := os.Hostname()
 	if err != nil {
-		return "", "", "", fmt.Errorf("failed to get hostname: %w", err)
+		return core.Registration{}, fmt.Errorf("failed to get hostname: %w", err)
 	}
 
 	client := pbconnect.NewFleetServiceClient(f.client, serverURL)
@@ -51,8 +52,13 @@ func (f *fleetRegistrar) Register(ctx context.Context, serverURL, cluster string
 
 	resp, err := client.Register(ctx, req)
 	if err != nil {
-		return "", "", "", err
+		return core.Registration{}, err
 	}
 
-	return resp.GetEndpoint(), resp.GetFingerprint(), fmt.Sprintf("%s:%s", agentID, resp.GetToken()), nil
+	return core.Registration{
+		Endpoint:    resp.GetEndpoint(),
+		Fingerprint: resp.GetFingerprint(),
+		Auth:        fmt.Sprintf("%s:%s", agentID, resp.GetToken()),
+		ProxyToken:  resp.GetProxyToken(),
+	}, nil
 }

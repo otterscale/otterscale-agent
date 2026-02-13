@@ -10,6 +10,10 @@ import (
 	"fmt"
 )
 
+// ProxyTokenHeader is the HTTP header used to authenticate requests
+// passing through the tunnel reverse proxy.
+const ProxyTokenHeader = "X-Proxy-Token"
+
 // TunnelProvider is the server-side abstraction for managing reverse
 // tunnels. It allocates unique endpoints per cluster and provisions
 // tunnel users for each connecting agent.
@@ -19,18 +23,42 @@ type TunnelProvider interface {
 	Fingerprint() string
 	// ListClusters returns the names of all registered clusters.
 	ListClusters() []string
-	// RegisterCluster creates a tunnel user and returns the allocated endpoint.
-	RegisterCluster(cluster, user, pass string) (string, error)
+	// RegisterCluster creates a tunnel user and returns the allocated
+	// endpoint and a proxy token the server must present on every
+	// proxied request.
+	RegisterCluster(cluster, user, pass, proxyToken string) (string, error)
 	// ResolveAddress returns the HTTP base URL for the given cluster.
 	ResolveAddress(cluster string) (string, error)
+	// ProxyToken returns the current proxy token for the given cluster.
+	ProxyToken(cluster string) (string, error)
 }
 
 // TunnelConsumer is the agent-side abstraction for registering with
 // the fleet server and obtaining tunnel credentials.
 type TunnelConsumer interface {
 	// Register calls the fleet API and returns the endpoint, TLS
-	// fingerprint, and authentication string for the tunnel.
-	Register(ctx context.Context, serverURL, cluster string) (endpoint, fingerprint, auth string, err error)
+	// fingerprint, authentication string, and proxy token for the
+	// tunnel.
+	Register(ctx context.Context, serverURL, cluster string) (Registration, error)
+}
+
+// Registration holds the credentials and connection details returned
+// by the fleet server after a successful cluster registration.
+type Registration struct {
+	// Endpoint is the tunnel server URL the agent should connect to.
+	Endpoint string
+	// Fingerprint is the TLS fingerprint of the tunnel server, used
+	// by the agent to verify server identity without a CA.
+	Fingerprint string
+	// Auth is the base64-encoded "user:password" string used for
+	// tunnel authentication.
+	Auth string
+	// Token is the one-time token assigned to the agent during
+	// registration, used to authenticate with the tunnel server.
+	Token string
+	// ProxyToken is the token the server must present on every
+	// proxied request so the agent can verify the request origin.
+	ProxyToken string
 }
 
 // FleetUseCase orchestrates cluster registration on the server side.
@@ -54,21 +82,27 @@ func (uc *FleetUseCase) ListClusters() []string {
 }
 
 // RegisterCluster generates a fresh token, registers the agent with
-// the tunnel provider, and returns the tunnel endpoint together with
-// the token the agent should use for authentication.
-func (uc *FleetUseCase) RegisterCluster(cluster, agentID string) (endpoint, token string, err error) {
-	token, err = uc.generateToken()
+// the tunnel provider, and returns the tunnel endpoint, the
+// authentication token, and the proxy token.
+func (uc *FleetUseCase) RegisterCluster(cluster, agentID string) (Registration, error) {
+	token, err := uc.generateToken()
 	if err != nil {
-		return
+		return Registration{}, err
 	}
-	endpoint, err = uc.tunnel.RegisterCluster(cluster, agentID, token)
-	return
-}
-
-// Fingerprint returns the TLS fingerprint of the tunnel server so
-// that agents can verify server identity without a CA.
-func (uc *FleetUseCase) Fingerprint() string {
-	return uc.tunnel.Fingerprint()
+	proxyToken, err := uc.generateToken()
+	if err != nil {
+		return Registration{}, err
+	}
+	endpoint, err := uc.tunnel.RegisterCluster(cluster, agentID, token, proxyToken)
+	if err != nil {
+		return Registration{}, err
+	}
+	return Registration{
+		Endpoint:    endpoint,
+		Fingerprint: uc.tunnel.Fingerprint(),
+		Token:       token,
+		ProxyToken:  proxyToken,
+	}, nil
 }
 
 // generateToken produces a 32-byte cryptographically random token

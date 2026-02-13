@@ -244,6 +244,7 @@ type RegisterResponse struct {
 	xxx_hidden_Endpoint    *string                `protobuf:"bytes,1,opt,name=endpoint"`
 	xxx_hidden_Fingerprint *string                `protobuf:"bytes,2,opt,name=fingerprint"`
 	xxx_hidden_Token       *string                `protobuf:"bytes,3,opt,name=token"`
+	xxx_hidden_ProxyToken  *string                `protobuf:"bytes,4,opt,name=proxy_token,json=proxyToken"`
 	XXX_raceDetectHookData protoimpl.RaceDetectHookData
 	XXX_presence           [1]uint32
 	unknownFields          protoimpl.UnknownFields
@@ -305,19 +306,34 @@ func (x *RegisterResponse) GetToken() string {
 	return ""
 }
 
+func (x *RegisterResponse) GetProxyToken() string {
+	if x != nil {
+		if x.xxx_hidden_ProxyToken != nil {
+			return *x.xxx_hidden_ProxyToken
+		}
+		return ""
+	}
+	return ""
+}
+
 func (x *RegisterResponse) SetEndpoint(v string) {
 	x.xxx_hidden_Endpoint = &v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 0, 3)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 0, 4)
 }
 
 func (x *RegisterResponse) SetFingerprint(v string) {
 	x.xxx_hidden_Fingerprint = &v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 1, 3)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 1, 4)
 }
 
 func (x *RegisterResponse) SetToken(v string) {
 	x.xxx_hidden_Token = &v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 2, 3)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 2, 4)
+}
+
+func (x *RegisterResponse) SetProxyToken(v string) {
+	x.xxx_hidden_ProxyToken = &v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 3, 4)
 }
 
 func (x *RegisterResponse) HasEndpoint() bool {
@@ -341,6 +357,13 @@ func (x *RegisterResponse) HasToken() bool {
 	return protoimpl.X.Present(&(x.XXX_presence[0]), 2)
 }
 
+func (x *RegisterResponse) HasProxyToken() bool {
+	if x == nil {
+		return false
+	}
+	return protoimpl.X.Present(&(x.XXX_presence[0]), 3)
+}
+
 func (x *RegisterResponse) ClearEndpoint() {
 	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 0)
 	x.xxx_hidden_Endpoint = nil
@@ -356,6 +379,11 @@ func (x *RegisterResponse) ClearToken() {
 	x.xxx_hidden_Token = nil
 }
 
+func (x *RegisterResponse) ClearProxyToken() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 3)
+	x.xxx_hidden_ProxyToken = nil
+}
+
 type RegisterResponse_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
@@ -365,6 +393,9 @@ type RegisterResponse_builder struct {
 	Fingerprint *string
 	// The token for the agent to register with the server.
 	Token *string
+	// Token the server includes on every proxied HTTP request so the
+	// agent can reject direct (non-tunnel) access.
+	ProxyToken *string
 }
 
 func (b0 RegisterResponse_builder) Build() *RegisterResponse {
@@ -372,16 +403,20 @@ func (b0 RegisterResponse_builder) Build() *RegisterResponse {
 	b, x := &b0, m0
 	_, _ = b, x
 	if b.Endpoint != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 0, 3)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 0, 4)
 		x.xxx_hidden_Endpoint = b.Endpoint
 	}
 	if b.Fingerprint != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 1, 3)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 1, 4)
 		x.xxx_hidden_Fingerprint = b.Fingerprint
 	}
 	if b.Token != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 2, 3)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 2, 4)
 		x.xxx_hidden_Token = b.Token
+	}
+	if b.ProxyToken != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 3, 4)
+		x.xxx_hidden_ProxyToken = b.ProxyToken
 	}
 	return m0
 }
@@ -396,11 +431,13 @@ const file_api_fleet_v1_fleet_proto_rawDesc = "" +
 	"\bclusters\x18\x01 \x03(\tR\bclusters\"F\n" +
 	"\x0fRegisterRequest\x12\x18\n" +
 	"\acluster\x18\x01 \x01(\tR\acluster\x12\x19\n" +
-	"\bagent_id\x18\x02 \x01(\tR\aagentId\"f\n" +
+	"\bagent_id\x18\x02 \x01(\tR\aagentId\"\x87\x01\n" +
 	"\x10RegisterResponse\x12\x1a\n" +
 	"\bendpoint\x18\x01 \x01(\tR\bendpoint\x12 \n" +
 	"\vfingerprint\x18\x02 \x01(\tR\vfingerprint\x12\x14\n" +
-	"\x05token\x18\x03 \x01(\tR\x05token2\xf8\x01\n" +
+	"\x05token\x18\x03 \x01(\tR\x05token\x12\x1f\n" +
+	"\vproxy_token\x18\x04 \x01(\tR\n" +
+	"proxyToken2\xf8\x01\n" +
 	"\fFleetService\x12y\n" +
 	"\fListClusters\x12(.otterscale.fleet.v1.ListClustersRequest\x1a).otterscale.fleet.v1.ListClustersResponse\"\x14\x8a\xdf\xd5\x1d\x0f\n" +
 	"\rfleet-enabled\x12m\n" +

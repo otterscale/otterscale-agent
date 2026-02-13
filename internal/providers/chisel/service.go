@@ -23,6 +23,14 @@ import (
 // Each cluster is differentiated by its loopback host, not its port.
 const tunnelPort = 16598
 
+// clusterEntry holds the per-cluster tunnel state: the allocated
+// loopback host, the chisel user name, and the proxy token.
+type clusterEntry struct {
+	host       string // unique 127.x.x.x loopback address
+	user       string // chisel user name
+	proxyToken string // token for HTTP-level proxy authentication
+}
+
 // Service manages the mapping between cluster names and unique
 // loopback addresses, and provisions chisel users for each agent.
 // It implements core.TunnelProvider and additionally exposes the
@@ -31,10 +39,9 @@ type Service struct {
 	server *chserver.Server
 	log    *slog.Logger
 
-	mu           sync.RWMutex
-	clusterHosts map[string]string   // cluster name -> loopback host
-	clusterUsers map[string]string   // cluster name -> chisel user name
-	usedHosts    map[string]struct{} // set of allocated hosts
+	mu        sync.RWMutex
+	clusters  map[string]*clusterEntry // cluster name -> tunnel state
+	usedHosts map[string]struct{}      // set of allocated hosts
 }
 
 // NewService returns a new Service backed by chisel.
@@ -42,11 +49,10 @@ type Service struct {
 // transport layer; see tunnel.NewServer.
 func NewService() *Service {
 	return &Service{
-		server:       &chserver.Server{},
-		log:          slog.Default().With("component", "tunnel-provider"),
-		clusterHosts: make(map[string]string),
-		clusterUsers: make(map[string]string),
-		usedHosts:    make(map[string]struct{}),
+		server:    &chserver.Server{},
+		log:       slog.Default().With("component", "tunnel-provider"),
+		clusters:  make(map[string]*clusterEntry),
+		usedHosts: make(map[string]struct{}),
 	}
 }
 
@@ -72,17 +78,19 @@ func (s *Service) ListClusters() []string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	return slices.Collect(maps.Keys(s.clusterHosts))
+	return slices.Collect(maps.Keys(s.clusters))
 }
 
 // RegisterCluster associates a cluster with a unique loopback host,
 // creates a chisel user with credentials (user/pass), and returns the
-// tunnel endpoint (host:port).
+// tunnel endpoint (host:port) together with a proxy token. The server
+// must present this token on every proxied request so the agent can
+// reject direct access.
 //
 // If the cluster was previously registered, the old host allocation is
 // released so that re-registration always moves the cluster to a fresh
 // address.
-func (s *Service) RegisterCluster(cluster, user, pass string) (string, error) {
+func (s *Service) RegisterCluster(cluster, user, pass, proxyToken string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -93,11 +101,9 @@ func (s *Service) RegisterCluster(cluster, user, pass string) (string, error) {
 
 	// Remove the previous user and host for this cluster, if any,
 	// so that stale credentials do not accumulate in chisel.
-	if prevUser, ok := s.clusterUsers[cluster]; ok {
-		s.server.DeleteUser(prevUser)
-	}
-	if prev, ok := s.clusterHosts[cluster]; ok {
-		s.releaseHost(prev)
+	if prev, ok := s.clusters[cluster]; ok {
+		s.server.DeleteUser(prev.user)
+		s.releaseHost(prev.host)
 	}
 
 	// Restrict the user to reverse-tunnelling only the allocated
@@ -109,8 +115,11 @@ func (s *Service) RegisterCluster(cluster, user, pass string) (string, error) {
 		return "", err
 	}
 
-	s.clusterHosts[cluster] = host
-	s.clusterUsers[cluster] = user
+	s.clusters[cluster] = &clusterEntry{
+		host:       host,
+		user:       user,
+		proxyToken: proxyToken,
+	}
 
 	return fmt.Sprintf("%s:%d", host, tunnelPort), nil
 }
@@ -122,14 +131,27 @@ func (s *Service) DeregisterCluster(cluster string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if user, ok := s.clusterUsers[cluster]; ok {
-		s.server.DeleteUser(user)
-		delete(s.clusterUsers, cluster)
+	entry, ok := s.clusters[cluster]
+	if !ok {
+		return
 	}
-	if host, ok := s.clusterHosts[cluster]; ok {
-		s.releaseHost(host)
-		delete(s.clusterHosts, cluster)
+	s.server.DeleteUser(entry.user)
+	s.releaseHost(entry.host)
+	delete(s.clusters, cluster)
+}
+
+// ProxyToken returns the current proxy token for the given cluster.
+// Returns an error if the cluster is not registered.
+func (s *Service) ProxyToken(cluster string) (string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	entry, ok := s.clusters[cluster]
+	if !ok {
+		return "", fmt.Errorf("cluster %s not registered", cluster)
 	}
+
+	return entry.proxyToken, nil
 }
 
 // ResolveAddress returns the HTTP base URL for the given cluster's
@@ -138,12 +160,12 @@ func (s *Service) ResolveAddress(cluster string) (string, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	host, ok := s.clusterHosts[cluster]
+	entry, ok := s.clusters[cluster]
 	if !ok {
 		return "", fmt.Errorf("cluster %s not registered", cluster)
 	}
 
-	return fmt.Sprintf("http://%s:%d", host, tunnelPort), nil
+	return fmt.Sprintf("http://%s:%d", entry.host, tunnelPort), nil
 }
 
 // allocateHost picks a unique loopback address for the given cluster

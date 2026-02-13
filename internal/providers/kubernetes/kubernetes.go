@@ -72,6 +72,11 @@ func (k *Kubernetes) impersonationConfig(ctx context.Context, cluster string) (*
 // Transports are shared across users because impersonation is handled
 // via HTTP headers, not at the transport level. This avoids creating
 // new TCP connections on every request.
+//
+// The returned transport is wrapped with proxyAuthTransport so that
+// every outgoing request carries the current proxy token for the
+// cluster. The token is read dynamically on each request, so token
+// rotation on re-registration is handled automatically.
 func (k *Kubernetes) roundTripper(cluster, address string) (http.RoundTripper, error) {
 	k.mu.Lock()
 	defer k.mu.Unlock()
@@ -80,11 +85,35 @@ func (k *Kubernetes) roundTripper(cluster, address string) (http.RoundTripper, e
 		return rt, nil
 	}
 
-	rt, err := rest.TransportFor(&rest.Config{Host: address})
+	base, err := rest.TransportFor(&rest.Config{Host: address})
 	if err != nil {
 		return nil, apierrors.NewInternalError(err)
+	}
+
+	rt := &proxyAuthTransport{
+		base:    base,
+		cluster: cluster,
+		tunnel:  k.tunnel,
 	}
 	k.transports[cluster] = rt
 
 	return rt, nil
+}
+
+// proxyAuthTransport injects the per-cluster proxy token into every
+// outgoing request so the agent's reverse proxy can authenticate it.
+type proxyAuthTransport struct {
+	base    http.RoundTripper
+	cluster string
+	tunnel  core.TunnelProvider
+}
+
+func (t *proxyAuthTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	token, err := t.tunnel.ProxyToken(t.cluster)
+	if err != nil {
+		return nil, err
+	}
+	req = req.Clone(req.Context())
+	req.Header.Set(core.ProxyTokenHeader, token)
+	return t.base.RoundTrip(req)
 }
