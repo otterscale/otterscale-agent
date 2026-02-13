@@ -88,5 +88,8 @@ func (s *Server) Run(ctx context.Context, cfg Config) error {
 		return fmt.Errorf("failed to create tunnel server: %w", err)
 	}
 
+	// Detect disconnected tunnel clients and remove stale registrations.
+	go s.tunnel.RunHealthCheck(ctx)
+
 	return transport.Serve(ctx, httpSrv, tunnelSrv)
 }

@@ -8,6 +8,7 @@ package chisel
 import (
 	"fmt"
 	"hash/fnv"
+	"log/slog"
 	"maps"
 	"regexp"
 	"slices"
@@ -28,6 +29,7 @@ const tunnelPort = 16598
 // underlying chisel server via Server() for transport-layer init.
 type Service struct {
 	server *chserver.Server
+	log    *slog.Logger
 
 	mu           sync.RWMutex
 	clusterHosts map[string]string   // cluster name -> loopback host
@@ -41,6 +43,7 @@ type Service struct {
 func NewService() *Service {
 	return &Service{
 		server:       &chserver.Server{},
+		log:          slog.Default().With("component", "tunnel-provider"),
 		clusterHosts: make(map[string]string),
 		clusterUsers: make(map[string]string),
 		usedHosts:    make(map[string]struct{}),
@@ -110,6 +113,23 @@ func (s *Service) RegisterCluster(cluster, user, pass string) (string, error) {
 	s.clusterUsers[cluster] = user
 
 	return fmt.Sprintf("%s:%d", host, tunnelPort), nil
+}
+
+// DeregisterCluster removes a cluster's tunnel allocation, deleting
+// the chisel user and releasing the loopback host. It is a no-op if
+// the cluster is not currently registered.
+func (s *Service) DeregisterCluster(cluster string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if user, ok := s.clusterUsers[cluster]; ok {
+		s.server.DeleteUser(user)
+		delete(s.clusterUsers, cluster)
+	}
+	if host, ok := s.clusterHosts[cluster]; ok {
+		s.releaseHost(host)
+		delete(s.clusterHosts, cluster)
+	}
 }
 
 // ResolveAddress returns the HTTP base URL for the given cluster's
