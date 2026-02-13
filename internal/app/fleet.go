@@ -22,6 +22,14 @@ func NewFleetService(fleet *core.FleetUseCase) *FleetService {
 
 var _ pbconnect.FleetServiceHandler = (*FleetService)(nil)
 
+func (s *FleetService) ListClusters(ctx context.Context, req *pb.ListClustersRequest) (*pb.ListClustersResponse, error) {
+	clusters := s.fleet.ListClusters()
+
+	resp := &pb.ListClustersResponse{}
+	resp.SetClusters(clusters)
+	return resp, nil
+}
+
 func (s *FleetService) Register(ctx context.Context, req *pb.RegisterRequest) (*pb.RegisterResponse, error) {
 	endpoint, token, err := s.fleet.RegisterCluster(req.GetCluster(), req.GetAgentId())
 	if err != nil {

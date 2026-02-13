@@ -11,6 +11,7 @@ import (
 
 type TunnelProvider interface {
 	Server() *chserver.Server
+	ListClusters() []string
 	RegisterCluster(cluster, user, pass string) (string, error)
 	ResolveAddress(cluster string) (string, error)
 }
@@ -27,6 +28,10 @@ func NewFleetUseCase(tunnel TunnelProvider) *FleetUseCase {
 	return &FleetUseCase{
 		tunnel: tunnel,
 	}
+}
+
+func (uc *FleetUseCase) ListClusters() []string {
+	return uc.tunnel.ListClusters()
 }
 
 func (uc *FleetUseCase) RegisterCluster(cluster, agentID string) (endpoint, token string, err error) {

@@ -3,7 +3,9 @@ package chisel
 import (
 	"fmt"
 	"hash/fnv"
+	"maps"
 	"regexp"
+	"slices"
 	"sync"
 
 	chserver "github.com/jpillora/chisel/server"
@@ -33,6 +35,11 @@ var _ core.TunnelProvider = (*service)(nil)
 
 func (c *service) Server() *chserver.Server {
 	return c.server
+}
+
+func (c *service) ListClusters() []string {
+	clusters := slices.Collect(maps.Keys(c.clusterHosts))
+	return clusters
 }
 
 func (c *service) RegisterCluster(cluster, user, pass string) (string, error) {

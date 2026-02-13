@@ -33,16 +33,22 @@ const (
 // reflection-formatted method names, remove the leading slash and convert the remaining slash to a
 // period.
 const (
+	// FleetServiceListClustersProcedure is the fully-qualified name of the FleetService's ListClusters
+	// RPC.
+	FleetServiceListClustersProcedure = "/otterscale.fleet.v1.FleetService/ListClusters"
 	// FleetServiceRegisterProcedure is the fully-qualified name of the FleetService's Register RPC.
 	FleetServiceRegisterProcedure = "/otterscale.fleet.v1.FleetService/Register"
 )
 
 // FleetServiceClient is a client for the otterscale.fleet.v1.FleetService service.
 type FleetServiceClient interface {
+	// ListClusters returns all cluster identifiers that the current agent
+	// is registered to. This is used to discover which clusters are available
+	// for tunnel connections.
+	ListClusters(context.Context, *v1.ListClustersRequest) (*v1.ListClustersResponse, error)
 	// Register allows an agent to register itself with the tunnel server.
 	// The agent sends its cluster identity and tunnel port; the server responds
 	// with its fingerprint so the agent can verify the tunnel connection.
-	// Authentication is provided via gRPC metadata (Basic Auth).
 	Register(context.Context, *v1.RegisterRequest) (*v1.RegisterResponse, error)
 }
 
@@ -57,6 +63,12 @@ func NewFleetServiceClient(httpClient connect.HTTPClient, baseURL string, opts .
 	baseURL = strings.TrimRight(baseURL, "/")
 	fleetServiceMethods := v1.File_api_fleet_v1_fleet_proto.Services().ByName("FleetService").Methods()
 	return &fleetServiceClient{
+		listClusters: connect.NewClient[v1.ListClustersRequest, v1.ListClustersResponse](
+			httpClient,
+			baseURL+FleetServiceListClustersProcedure,
+			connect.WithSchema(fleetServiceMethods.ByName("ListClusters")),
+			connect.WithClientOptions(opts...),
+		),
 		register: connect.NewClient[v1.RegisterRequest, v1.RegisterResponse](
 			httpClient,
 			baseURL+FleetServiceRegisterProcedure,
@@ -68,7 +80,17 @@ func NewFleetServiceClient(httpClient connect.HTTPClient, baseURL string, opts .
 
 // fleetServiceClient implements FleetServiceClient.
 type fleetServiceClient struct {
-	register *connect.Client[v1.RegisterRequest, v1.RegisterResponse]
+	listClusters *connect.Client[v1.ListClustersRequest, v1.ListClustersResponse]
+	register     *connect.Client[v1.RegisterRequest, v1.RegisterResponse]
+}
+
+// ListClusters calls otterscale.fleet.v1.FleetService.ListClusters.
+func (c *fleetServiceClient) ListClusters(ctx context.Context, req *v1.ListClustersRequest) (*v1.ListClustersResponse, error) {
+	response, err := c.listClusters.CallUnary(ctx, connect.NewRequest(req))
+	if response != nil {
+		return response.Msg, err
+	}
+	return nil, err
 }
 
 // Register calls otterscale.fleet.v1.FleetService.Register.
@@ -82,10 +104,13 @@ func (c *fleetServiceClient) Register(ctx context.Context, req *v1.RegisterReque
 
 // FleetServiceHandler is an implementation of the otterscale.fleet.v1.FleetService service.
 type FleetServiceHandler interface {
+	// ListClusters returns all cluster identifiers that the current agent
+	// is registered to. This is used to discover which clusters are available
+	// for tunnel connections.
+	ListClusters(context.Context, *v1.ListClustersRequest) (*v1.ListClustersResponse, error)
 	// Register allows an agent to register itself with the tunnel server.
 	// The agent sends its cluster identity and tunnel port; the server responds
 	// with its fingerprint so the agent can verify the tunnel connection.
-	// Authentication is provided via gRPC metadata (Basic Auth).
 	Register(context.Context, *v1.RegisterRequest) (*v1.RegisterResponse, error)
 }
 
@@ -96,6 +121,12 @@ type FleetServiceHandler interface {
 // and JSON codecs. They also support gzip compression.
 func NewFleetServiceHandler(svc FleetServiceHandler, opts ...connect.HandlerOption) (string, http.Handler) {
 	fleetServiceMethods := v1.File_api_fleet_v1_fleet_proto.Services().ByName("FleetService").Methods()
+	fleetServiceListClustersHandler := connect.NewUnaryHandlerSimple(
+		FleetServiceListClustersProcedure,
+		svc.ListClusters,
+		connect.WithSchema(fleetServiceMethods.ByName("ListClusters")),
+		connect.WithHandlerOptions(opts...),
+	)
 	fleetServiceRegisterHandler := connect.NewUnaryHandlerSimple(
 		FleetServiceRegisterProcedure,
 		svc.Register,
@@ -104,6 +135,8 @@ func NewFleetServiceHandler(svc FleetServiceHandler, opts ...connect.HandlerOpti
 	)
 	return "/otterscale.fleet.v1.FleetService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case FleetServiceListClustersProcedure:
+			fleetServiceListClustersHandler.ServeHTTP(w, r)
 		case FleetServiceRegisterProcedure:
 			fleetServiceRegisterHandler.ServeHTTP(w, r)
 		default:
@@ -114,6 +147,10 @@ func NewFleetServiceHandler(svc FleetServiceHandler, opts ...connect.HandlerOpti
 
 // UnimplementedFleetServiceHandler returns CodeUnimplemented from all methods.
 type UnimplementedFleetServiceHandler struct{}
+
+func (UnimplementedFleetServiceHandler) ListClusters(context.Context, *v1.ListClustersRequest) (*v1.ListClustersResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("otterscale.fleet.v1.FleetService.ListClusters is not implemented"))
+}
 
 func (UnimplementedFleetServiceHandler) Register(context.Context, *v1.RegisterRequest) (*v1.RegisterResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("otterscale.fleet.v1.FleetService.Register is not implemented"))

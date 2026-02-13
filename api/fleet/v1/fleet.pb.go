@@ -21,6 +21,109 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// ListClustersRequest is an empty request message for listing clusters.
+type ListClustersRequest struct {
+	state         protoimpl.MessageState `protogen:"opaque.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListClustersRequest) Reset() {
+	*x = ListClustersRequest{}
+	mi := &file_api_fleet_v1_fleet_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListClustersRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListClustersRequest) ProtoMessage() {}
+
+func (x *ListClustersRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_api_fleet_v1_fleet_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+type ListClustersRequest_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+}
+
+func (b0 ListClustersRequest_builder) Build() *ListClustersRequest {
+	m0 := &ListClustersRequest{}
+	b, x := &b0, m0
+	_, _ = b, x
+	return m0
+}
+
+// ListClustersResponse contains the list of clusters the agent is registered to.
+type ListClustersResponse struct {
+	state               protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Clusters []string               `protobuf:"bytes,1,rep,name=clusters"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
+}
+
+func (x *ListClustersResponse) Reset() {
+	*x = ListClustersResponse{}
+	mi := &file_api_fleet_v1_fleet_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListClustersResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListClustersResponse) ProtoMessage() {}
+
+func (x *ListClustersResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_api_fleet_v1_fleet_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+func (x *ListClustersResponse) GetClusters() []string {
+	if x != nil {
+		return x.xxx_hidden_Clusters
+	}
+	return nil
+}
+
+func (x *ListClustersResponse) SetClusters(v []string) {
+	x.xxx_hidden_Clusters = v
+}
+
+type ListClustersResponse_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// The list of cluster identifiers.
+	Clusters []string
+}
+
+func (b0 ListClustersResponse_builder) Build() *ListClustersResponse {
+	m0 := &ListClustersResponse{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Clusters = b.Clusters
+	return m0
+}
+
 // RegisterRequest contains the agent's cluster identity and tunnel port.
 type RegisterRequest struct {
 	state                  protoimpl.MessageState `protogen:"opaque.v1"`
@@ -34,7 +137,7 @@ type RegisterRequest struct {
 
 func (x *RegisterRequest) Reset() {
 	*x = RegisterRequest{}
-	mi := &file_api_fleet_v1_fleet_proto_msgTypes[0]
+	mi := &file_api_fleet_v1_fleet_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -46,7 +149,7 @@ func (x *RegisterRequest) String() string {
 func (*RegisterRequest) ProtoMessage() {}
 
 func (x *RegisterRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_fleet_v1_fleet_proto_msgTypes[0]
+	mi := &file_api_fleet_v1_fleet_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -149,7 +252,7 @@ type RegisterResponse struct {
 
 func (x *RegisterResponse) Reset() {
 	*x = RegisterResponse{}
-	mi := &file_api_fleet_v1_fleet_proto_msgTypes[1]
+	mi := &file_api_fleet_v1_fleet_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -161,7 +264,7 @@ func (x *RegisterResponse) String() string {
 func (*RegisterResponse) ProtoMessage() {}
 
 func (x *RegisterResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_fleet_v1_fleet_proto_msgTypes[1]
+	mi := &file_api_fleet_v1_fleet_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -287,28 +390,37 @@ var File_api_fleet_v1_fleet_proto protoreflect.FileDescriptor
 
 const file_api_fleet_v1_fleet_proto_rawDesc = "" +
 	"\n" +
-	"\x18api/fleet/v1/fleet.proto\x12\x13otterscale.fleet.v1\x1a\x15api/annotations.proto\"F\n" +
+	"\x18api/fleet/v1/fleet.proto\x12\x13otterscale.fleet.v1\x1a\x15api/annotations.proto\"\x15\n" +
+	"\x13ListClustersRequest\"2\n" +
+	"\x14ListClustersResponse\x12\x1a\n" +
+	"\bclusters\x18\x01 \x03(\tR\bclusters\"F\n" +
 	"\x0fRegisterRequest\x12\x18\n" +
 	"\acluster\x18\x01 \x01(\tR\acluster\x12\x19\n" +
 	"\bagent_id\x18\x02 \x01(\tR\aagentId\"f\n" +
 	"\x10RegisterResponse\x12\x1a\n" +
 	"\bendpoint\x18\x01 \x01(\tR\bendpoint\x12 \n" +
 	"\vfingerprint\x18\x02 \x01(\tR\vfingerprint\x12\x14\n" +
-	"\x05token\x18\x03 \x01(\tR\x05token2}\n" +
-	"\fFleetService\x12m\n" +
+	"\x05token\x18\x03 \x01(\tR\x05token2\xf8\x01\n" +
+	"\fFleetService\x12y\n" +
+	"\fListClusters\x12(.otterscale.fleet.v1.ListClustersRequest\x1a).otterscale.fleet.v1.ListClustersResponse\"\x14\x8a\xdf\xd5\x1d\x0f\n" +
+	"\rfleet-enabled\x12m\n" +
 	"\bRegister\x12$.otterscale.fleet.v1.RegisterRequest\x1a%.otterscale.fleet.v1.RegisterResponse\"\x14\x8a\xdf\xd5\x1d\x0f\n" +
 	"\rfleet-enabledB8Z6github.com/otterscale/otterscale-agent/api/fleet/v1;pbb\beditionsp\xe8\a"
 
-var file_api_fleet_v1_fleet_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_api_fleet_v1_fleet_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
 var file_api_fleet_v1_fleet_proto_goTypes = []any{
-	(*RegisterRequest)(nil),  // 0: otterscale.fleet.v1.RegisterRequest
-	(*RegisterResponse)(nil), // 1: otterscale.fleet.v1.RegisterResponse
+	(*ListClustersRequest)(nil),  // 0: otterscale.fleet.v1.ListClustersRequest
+	(*ListClustersResponse)(nil), // 1: otterscale.fleet.v1.ListClustersResponse
+	(*RegisterRequest)(nil),      // 2: otterscale.fleet.v1.RegisterRequest
+	(*RegisterResponse)(nil),     // 3: otterscale.fleet.v1.RegisterResponse
 }
 var file_api_fleet_v1_fleet_proto_depIdxs = []int32{
-	0, // 0: otterscale.fleet.v1.FleetService.Register:input_type -> otterscale.fleet.v1.RegisterRequest
-	1, // 1: otterscale.fleet.v1.FleetService.Register:output_type -> otterscale.fleet.v1.RegisterResponse
-	1, // [1:2] is the sub-list for method output_type
-	0, // [0:1] is the sub-list for method input_type
+	0, // 0: otterscale.fleet.v1.FleetService.ListClusters:input_type -> otterscale.fleet.v1.ListClustersRequest
+	2, // 1: otterscale.fleet.v1.FleetService.Register:input_type -> otterscale.fleet.v1.RegisterRequest
+	1, // 2: otterscale.fleet.v1.FleetService.ListClusters:output_type -> otterscale.fleet.v1.ListClustersResponse
+	3, // 3: otterscale.fleet.v1.FleetService.Register:output_type -> otterscale.fleet.v1.RegisterResponse
+	2, // [2:4] is the sub-list for method output_type
+	0, // [0:2] is the sub-list for method input_type
 	0, // [0:0] is the sub-list for extension type_name
 	0, // [0:0] is the sub-list for extension extendee
 	0, // [0:0] is the sub-list for field type_name
@@ -325,7 +437,7 @@ func file_api_fleet_v1_fleet_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_fleet_v1_fleet_proto_rawDesc), len(file_api_fleet_v1_fleet_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   2,
+			NumMessages:   4,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -44,6 +44,7 @@ func (s *Server) Run(ctx context.Context, cfg Config) error {
 			"/grpc.health.v1.Health/Check",
 			"/grpc.health.v1.Health/Watch",
 			"/grpc.reflection.v1.ServerReflection/ServerReflectionInfo",
+			fleetv1.FleetServiceListClustersProcedure,
 			fleetv1.FleetServiceRegisterProcedure,
 		}),
 		http.WithMount(s.handler.Mount),
