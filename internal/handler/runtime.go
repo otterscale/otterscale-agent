@@ -1,4 +1,4 @@
-package app
+package handler
 
 import (
 	"context"
@@ -65,7 +65,7 @@ func (s *RuntimeService) PodLog(ctx context.Context, req *pb.PodLogRequest, stre
 
 	reader, err := s.runtime.StartPodLogs(ctx, req.GetCluster(), req.GetNamespace(), req.GetName(), opts)
 	if err != nil {
-		return k8sErrorToConnectError(err)
+		return domainErrorToConnectError(err)
 	}
 	defer reader.Close()
 
@@ -83,7 +83,7 @@ func (s *RuntimeService) PodLog(ctx context.Context, req *pb.PodLogRequest, stre
 			if errors.Is(readErr, io.EOF) {
 				return nil
 			}
-			return k8sErrorToConnectError(readErr)
+			return domainErrorToConnectError(readErr)
 		}
 	}
 }
@@ -109,7 +109,7 @@ func (s *RuntimeService) ExecuteTTY(ctx context.Context, req *pb.ExecuteTTYReque
 		uint16(req.GetCols()),
 	)
 	if err != nil {
-		return k8sErrorToConnectError(err)
+		return domainErrorToConnectError(err)
 	}
 	defer s.runtime.CleanupExec(sess.ID)
 
@@ -204,7 +204,7 @@ type execChunk struct {
 // WriteTTY sends stdin data to an active exec session.
 func (s *RuntimeService) WriteTTY(_ context.Context, req *pb.WriteTTYRequest) (*emptypb.Empty, error) {
 	if err := s.runtime.WriteExec(req.GetSessionId(), req.GetStdin()); err != nil {
-		return nil, k8sErrorToConnectError(err)
+		return nil, domainErrorToConnectError(err)
 	}
 	return &emptypb.Empty{}, nil
 }
@@ -212,7 +212,7 @@ func (s *RuntimeService) WriteTTY(_ context.Context, req *pb.WriteTTYRequest) (*
 // ResizeTTY updates the terminal dimensions of an active exec session.
 func (s *RuntimeService) ResizeTTY(_ context.Context, req *pb.ResizeTTYRequest) (*emptypb.Empty, error) {
 	if err := s.runtime.ResizeExec(req.GetSessionId(), uint16(req.GetRows()), uint16(req.GetCols())); err != nil {
-		return nil, k8sErrorToConnectError(err)
+		return nil, domainErrorToConnectError(err)
 	}
 	return &emptypb.Empty{}, nil
 }
@@ -233,7 +233,7 @@ func (s *RuntimeService) PortForward(ctx context.Context, req *pb.PortForwardReq
 		req.GetPort(),
 	)
 	if err != nil {
-		return k8sErrorToConnectError(err)
+		return domainErrorToConnectError(err)
 	}
 	defer s.runtime.CleanupPortForward(sess.ID)
 
@@ -259,7 +259,7 @@ func (s *RuntimeService) PortForward(ctx context.Context, req *pb.PortForwardReq
 			if errors.Is(readErr, io.EOF) {
 				return nil
 			}
-			return k8sErrorToConnectError(readErr)
+			return domainErrorToConnectError(readErr)
 		}
 	}
 }
@@ -267,7 +267,7 @@ func (s *RuntimeService) PortForward(ctx context.Context, req *pb.PortForwardReq
 // WritePortForward sends data to an active port-forward session.
 func (s *RuntimeService) WritePortForward(_ context.Context, req *pb.WritePortForwardRequest) (*emptypb.Empty, error) {
 	if err := s.runtime.WritePortForward(req.GetSessionId(), req.GetData()); err != nil {
-		return nil, k8sErrorToConnectError(err)
+		return nil, domainErrorToConnectError(err)
 	}
 	return &emptypb.Empty{}, nil
 }
@@ -289,7 +289,7 @@ func (s *RuntimeService) Scale(ctx context.Context, req *pb.ScaleRequest) (*pb.S
 		req.GetReplicas(),
 	)
 	if err != nil {
-		return nil, k8sErrorToConnectError(err)
+		return nil, domainErrorToConnectError(err)
 	}
 
 	resp := &pb.ScaleResponse{}
@@ -312,7 +312,7 @@ func (s *RuntimeService) Restart(ctx context.Context, req *pb.RestartRequest) (*
 		req.GetNamespace(),
 		req.GetName(),
 	); err != nil {
-		return nil, k8sErrorToConnectError(err)
+		return nil, domainErrorToConnectError(err)
 	}
 	return &emptypb.Empty{}, nil
 }

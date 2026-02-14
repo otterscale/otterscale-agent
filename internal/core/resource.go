@@ -238,7 +238,7 @@ func (uc *ResourceUseCase) ListResources(
 	}
 
 	for i := range list.Items {
-		uc.cleanObject(&list.Items[i])
+		cleanObject(&list.Items[i])
 	}
 
 	return list, nil
@@ -396,7 +396,7 @@ func (uc *ResourceUseCase) fromYAML(manifest []byte) (*unstructured.Unstructured
 // cleanObject strips noisy metadata that clutters list output:
 //   - metadata.managedFields (server-side apply bookkeeping)
 //   - the kubectl.kubernetes.io/last-applied-configuration annotation
-func (uc *ResourceUseCase) cleanObject(obj *unstructured.Unstructured) {
+func cleanObject(obj *unstructured.Unstructured) {
 	unstructured.RemoveNestedField(obj.Object, "metadata", "managedFields")
 
 	annotations := obj.GetAnnotations()

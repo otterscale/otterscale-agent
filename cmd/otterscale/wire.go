@@ -4,7 +4,7 @@ package main
 
 import (
 	"github.com/google/wire"
-	"github.com/otterscale/otterscale-agent/internal/app"
+	"github.com/otterscale/otterscale-agent/internal/handler"
 	"github.com/otterscale/otterscale-agent/internal/bootstrap"
 	"github.com/otterscale/otterscale-agent/internal/cmd"
 	"github.com/otterscale/otterscale-agent/internal/cmd/agent"
@@ -26,7 +26,7 @@ func wireCmd() (*cobra.Command, func(), error) {
 // The config parameter provides the CA directory for persistent CA
 // material via provideCA.
 func wireServer(v core.Version, conf *config.Config) (*server.Server, func(), error) {
-	panic(wire.Build(cmd.ProviderSet, app.ProviderSet, core.ProviderSet, providers.ProviderSet, provideCA, provideAgentManifestConfig))
+	panic(wire.Build(cmd.ProviderSet, handler.ProviderSet, core.ProviderSet, providers.ProviderSet, provideCA, provideAgentManifestConfig))
 }
 
 // wireAgent assembles a fully wired Agent with its handler, fleet

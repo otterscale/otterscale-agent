@@ -7,7 +7,7 @@
 package main
 
 import (
-	"github.com/otterscale/otterscale-agent/internal/app"
+	"github.com/otterscale/otterscale-agent/internal/handler"
 	"github.com/otterscale/otterscale-agent/internal/bootstrap"
 	"github.com/otterscale/otterscale-agent/internal/cmd/agent"
 	"github.com/otterscale/otterscale-agent/internal/cmd/server"
@@ -56,15 +56,15 @@ func wireServer(v core.Version, conf *config.Config) (*server.Server, func(), er
 	if err != nil {
 		return nil, nil, err
 	}
-	fleetService := app.NewFleetService(fleetUseCase)
+	fleetService := handler.NewFleetService(fleetUseCase)
 	kubernetesKubernetes := kubernetes.New(service)
 	discoveryClient := kubernetes.NewDiscoveryClient(kubernetesKubernetes)
 	resourceRepo := kubernetes.NewResourceRepo(kubernetesKubernetes)
 	resourceUseCase := core.NewResourceUseCase(discoveryClient, resourceRepo)
-	resourceService := app.NewResourceService(resourceUseCase)
+	resourceService := handler.NewResourceService(resourceUseCase)
 	runtimeRepo := kubernetes.NewRuntimeRepo(kubernetesKubernetes)
 	runtimeUseCase := core.NewRuntimeUseCase(discoveryClient, runtimeRepo)
-	runtimeService := app.NewRuntimeService(runtimeUseCase)
+	runtimeService := handler.NewRuntimeService(runtimeUseCase)
 	handler := server.NewHandler(fleetService, resourceService, runtimeService)
 	serverServer := server.NewServer(handler, service, runtimeUseCase)
 	return serverServer, func() {

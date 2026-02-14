@@ -23,6 +23,20 @@ type Listener interface {
 	Stop(context.Context) error
 }
 
+// TunnelService provides the tunnel infrastructure needed by the
+// server for transport setup and health monitoring. The interface is
+// defined here (in the transport package) because its methods return
+// transport.Listener values. This avoids a reverse dependency from
+// the providers layer back into cmd/server.
+type TunnelService interface {
+	// BuildTunnelListener creates a fully configured tunnel server
+	// listener for the given address and host SAN.
+	BuildTunnelListener(address, host string) (Listener, error)
+	// BuildHealthListener returns a Listener that performs
+	// periodic health checks on registered tunnel endpoints.
+	BuildHealthListener() Listener
+}
+
 // Serve runs all listeners concurrently and coordinates graceful
 // shutdown. When ctx is cancelled or any listener returns an error,
 // all listeners are started first, then a single goroutine waits for

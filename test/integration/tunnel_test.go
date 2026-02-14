@@ -25,11 +25,13 @@ func TestFleetRegisterClusterUsesSingleSharedTunnelPort(t *testing.T) {
 	csrA := generateCSR(t, "agent-a")
 	csrB := generateCSR(t, "agent-b")
 
-	regA, err := fleet.RegisterCluster("cluster-a", "agent-a", "test", csrA)
+	ctx := context.Background()
+
+	regA, err := fleet.RegisterCluster(ctx, "cluster-a", "agent-a", "test", csrA)
 	if err != nil {
 		t.Fatalf("register cluster-a: %v", err)
 	}
-	regB, err := fleet.RegisterCluster("cluster-b", "agent-b", "test", csrB)
+	regB, err := fleet.RegisterCluster(ctx, "cluster-b", "agent-b", "test", csrB)
 	if err != nil {
 		t.Fatalf("register cluster-b: %v", err)
 	}
@@ -73,11 +75,13 @@ func TestFleetRegisterClusterLatestAgentWinsForSameCluster(t *testing.T) {
 	csr1 := generateCSR(t, "agent-r-1")
 	csr2 := generateCSR(t, "agent-r-2")
 
-	_, err = fleet.RegisterCluster("cluster-r", "agent-r-1", "test", csr1)
+	ctx := context.Background()
+
+	_, err = fleet.RegisterCluster(ctx, "cluster-r", "agent-r-1", "test", csr1)
 	if err != nil {
 		t.Fatalf("register agent-r-1: %v", err)
 	}
-	reg2, err := fleet.RegisterCluster("cluster-r", "agent-r-2", "test", csr2)
+	reg2, err := fleet.RegisterCluster(ctx, "cluster-r", "agent-r-2", "test", csr2)
 	if err != nil {
 		t.Fatalf("register agent-r-2: %v", err)
 	}
@@ -110,12 +114,14 @@ func TestFleetRegisterClusterReregisterAndReplaceAcrossAgents(t *testing.T) {
 	csrA := generateCSR(t, "agent-a")
 	csrB := generateCSR(t, "agent-b")
 
-	regA1, err := fleet.RegisterCluster("cluster-z", "agent-a", "test", csrA)
+	ctx := context.Background()
+
+	regA1, err := fleet.RegisterCluster(ctx, "cluster-z", "agent-a", "test", csrA)
 	if err != nil {
 		t.Fatalf("register agent-a #1: %v", err)
 	}
 
-	regB, err := fleet.RegisterCluster("cluster-z", "agent-b", "test", csrB)
+	regB, err := fleet.RegisterCluster(ctx, "cluster-z", "agent-b", "test", csrB)
 	if err != nil {
 		t.Fatalf("register agent-b: %v", err)
 	}
@@ -130,7 +136,7 @@ func TestFleetRegisterClusterReregisterAndReplaceAcrossAgents(t *testing.T) {
 		t.Fatalf("expected resolve to point to agent-b endpoint %q, got %q", regB.Endpoint, addrB)
 	}
 
-	regA2, err := fleet.RegisterCluster("cluster-z", "agent-a", "test", csrA)
+	regA2, err := fleet.RegisterCluster(ctx, "cluster-z", "agent-a", "test", csrA)
 	if err != nil {
 		t.Fatalf("register agent-a #2: %v", err)
 	}

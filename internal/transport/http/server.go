@@ -13,6 +13,8 @@ import (
 	"connectrpc.com/authn"
 	connectcors "connectrpc.com/cors"
 	"github.com/rs/cors"
+
+	"github.com/otterscale/otterscale-agent/internal/core"
 )
 
 // MountFunc registers handlers onto the provided ServeMux.
@@ -225,8 +227,13 @@ func (s *Server) buildHandler() (http.Handler, error) {
 
 // wrapAuth applies the authn middleware, skipping public paths.
 // Public paths are checked by exact match first, then by prefix.
+// After authn sets the transport-level auth info, bridgeUserInfo
+// copies it into the domain-level core.UserInfo context key so that
+// infrastructure adapters can access the user identity without
+// depending on the connectrpc/authn package.
 func (s *Server) wrapAuth(mux *http.ServeMux, next http.Handler) http.Handler {
-	protected := s.authMiddleware.Wrap(next)
+	bridged := bridgeUserInfo(next)
+	protected := s.authMiddleware.Wrap(bridged)
 	if len(s.publicPaths) == 0 && len(s.publicPathPrefixes) == 0 {
 		return protected
 	}
@@ -236,6 +243,18 @@ func (s *Server) wrapAuth(mux *http.ServeMux, next http.Handler) http.Handler {
 			return
 		}
 		protected.ServeHTTP(w, r)
+	})
+}
+
+// bridgeUserInfo extracts the authn-stored UserInfo and stores it via
+// the domain-level core.WithUserInfo context accessor. This decouples
+// infrastructure adapters from the transport-specific authn package.
+func bridgeUserInfo(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if info, ok := authn.GetInfo(r.Context()).(core.UserInfo); ok {
+			r = r.WithContext(core.WithUserInfo(r.Context(), info))
+		}
+		next.ServeHTTP(w, r)
 	})
 }
 

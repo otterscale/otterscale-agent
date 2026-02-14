@@ -12,7 +12,6 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -70,7 +69,8 @@ func (r *runtimeRepo) PodLogs(ctx context.Context, cluster, namespace, name stri
 		logOpts.LimitBytes = opts.LimitBytes
 	}
 
-	return clientset.CoreV1().Pods(namespace).GetLogs(name, logOpts).Stream(ctx)
+	result, err := clientset.CoreV1().Pods(namespace).GetLogs(name, logOpts).Stream(ctx)
+	return result, wrapK8sError(err)
 }
 
 // ---------------------------------------------------------------------------
@@ -86,7 +86,7 @@ func (r *runtimeRepo) Exec(ctx context.Context, cluster, namespace, name string,
 
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
-		return apierrors.NewInternalError(err)
+		return &core.DomainError{Code: core.ErrorCodeInternal, Message: "create clientset for exec", Cause: err}
 	}
 
 	execOpts := &corev1.PodExecOptions{
@@ -107,7 +107,7 @@ func (r *runtimeRepo) Exec(ctx context.Context, cluster, namespace, name string,
 
 	executor, err := remotecommand.NewSPDYExecutor(config, http.MethodPost, req.URL())
 	if err != nil {
-		return apierrors.NewInternalError(err)
+		return &core.DomainError{Code: core.ErrorCodeInternal, Message: "create SPDY executor", Cause: err}
 	}
 
 	streamOpts := remotecommand.StreamOptions{
@@ -120,7 +120,7 @@ func (r *runtimeRepo) Exec(ctx context.Context, cluster, namespace, name string,
 		streamOpts.TerminalSizeQueue = &sizeQueueAdapter{inner: opts.SizeQueue}
 	}
 
-	return executor.StreamWithContext(ctx, streamOpts)
+	return wrapK8sError(executor.StreamWithContext(ctx, streamOpts))
 }
 
 // ---------------------------------------------------------------------------
@@ -136,12 +136,12 @@ func (r *runtimeRepo) GetScale(ctx context.Context, cluster string, gvr schema.G
 
 	scaleObj, err := client.Resource(gvr).Namespace(namespace).Get(ctx, name, metav1.GetOptions{}, "scale")
 	if err != nil {
-		return 0, err
+		return 0, wrapK8sError(err)
 	}
 
 	replicas, found, err := unstructured.NestedInt64(scaleObj.Object, "spec", "replicas")
 	if err != nil || !found {
-		return 0, apierrors.NewInternalError(fmt.Errorf("failed to read spec.replicas from scale subresource"))
+		return 0, &core.DomainError{Code: core.ErrorCodeInternal, Message: "failed to read spec.replicas from scale subresource"}
 	}
 
 	return int32(replicas), nil
@@ -157,26 +157,26 @@ func (r *runtimeRepo) UpdateScale(ctx context.Context, cluster string, gvr schem
 	// GET current scale
 	scaleObj, err := client.Resource(gvr).Namespace(namespace).Get(ctx, name, metav1.GetOptions{}, "scale")
 	if err != nil {
-		return 0, err
+		return 0, wrapK8sError(err)
 	}
 
 	// SET desired replicas
 	if err := unstructured.SetNestedField(scaleObj.Object, int64(replicas), "spec", "replicas"); err != nil {
-		return 0, apierrors.NewInternalError(err)
+		return 0, &core.DomainError{Code: core.ErrorCodeInternal, Message: "set spec.replicas", Cause: err}
 	}
 
 	// UPDATE scale subresource
 	updated, err := client.Resource(gvr).Namespace(namespace).Update(ctx, scaleObj, metav1.UpdateOptions{}, "scale")
 	if err != nil {
-		return 0, err
+		return 0, wrapK8sError(err)
 	}
 
 	newReplicas, found, err := unstructured.NestedInt64(updated.Object, "spec", "replicas")
 	if err != nil {
-		return 0, apierrors.NewInternalError(fmt.Errorf("read updated replicas: %w", err))
+		return 0, &core.DomainError{Code: core.ErrorCodeInternal, Message: "read updated replicas", Cause: err}
 	}
 	if !found {
-		return 0, apierrors.NewInternalError(fmt.Errorf("spec.replicas not found in updated scale subresource"))
+		return 0, &core.DomainError{Code: core.ErrorCodeInternal, Message: "spec.replicas not found in updated scale subresource"}
 	}
 	return int32(newReplicas), nil
 }
@@ -211,7 +211,7 @@ func (r *runtimeRepo) Restart(ctx context.Context, cluster string, gvr schema.Gr
 	}
 
 	_, err = client.Resource(gvr).Namespace(namespace).Patch(ctx, name, types.MergePatchType, data, metav1.PatchOptions{})
-	return err
+	return wrapK8sError(err)
 }
 
 // ---------------------------------------------------------------------------
@@ -229,7 +229,7 @@ func (r *runtimeRepo) PortForward(ctx context.Context, cluster, namespace, name 
 
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
-		return apierrors.NewInternalError(err)
+		return &core.DomainError{Code: core.ErrorCodeInternal, Message: "create clientset for port-forward", Cause: err}
 	}
 
 	req := clientset.CoreV1().RESTClient().Post().
@@ -240,13 +240,13 @@ func (r *runtimeRepo) PortForward(ctx context.Context, cluster, namespace, name 
 
 	transport, upgrader, err := spdy.RoundTripperFor(config)
 	if err != nil {
-		return apierrors.NewInternalError(err)
+		return &core.DomainError{Code: core.ErrorCodeInternal, Message: "create SPDY round-tripper", Cause: err}
 	}
 
 	dialer := spdy.NewDialer(upgrader, &http.Client{Transport: transport}, http.MethodPost, req.URL())
 	streamConn, _, err := dialer.Dial(portForwardProtocolV1)
 	if err != nil {
-		return err
+		return wrapK8sError(err)
 	}
 	defer streamConn.Close()
 
@@ -261,7 +261,7 @@ func (r *runtimeRepo) PortForward(ctx context.Context, cluster, namespace, name 
 
 	errorStream, err := streamConn.CreateStream(errorHeaders)
 	if err != nil {
-		return apierrors.NewInternalError(fmt.Errorf("create error stream: %w", err))
+		return &core.DomainError{Code: core.ErrorCodeInternal, Message: "create error stream", Cause: err}
 	}
 	// Close the write direction of the error stream; we only read from it.
 	defer errorStream.Close()
@@ -274,7 +274,7 @@ func (r *runtimeRepo) PortForward(ctx context.Context, cluster, namespace, name 
 
 	dataStream, err := streamConn.CreateStream(dataHeaders)
 	if err != nil {
-		return apierrors.NewInternalError(fmt.Errorf("create data stream: %w", err))
+		return &core.DomainError{Code: core.ErrorCodeInternal, Message: "create data stream", Cause: err}
 	}
 	defer dataStream.Close()
 
@@ -373,7 +373,7 @@ func (r *runtimeRepo) clientset(ctx context.Context, cluster string) (*kubernete
 	}
 	cs, err := kubernetes.NewForConfig(config)
 	if err != nil {
-		return nil, apierrors.NewInternalError(err)
+		return nil, &core.DomainError{Code: core.ErrorCodeInternal, Message: "create kubernetes clientset", Cause: err}
 	}
 	return cs, nil
 }

@@ -53,7 +53,8 @@ func (r *resourceRepo) List(
 		Continue:      opts.Continue,
 	}
 
-	return client.Resource(gvr).Namespace(namespace).List(ctx, listOpts)
+	result, err := client.Resource(gvr).Namespace(namespace).List(ctx, listOpts)
+	return result, wrapK8sError(err)
 }
 
 // Get returns a single resource by name.
@@ -68,7 +69,8 @@ func (r *resourceRepo) Get(
 		return nil, err
 	}
 
-	return client.Resource(gvr).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
+	result, err := client.Resource(gvr).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
+	return result, wrapK8sError(err)
 }
 
 // Create creates a new resource from the given object.
@@ -84,7 +86,8 @@ func (r *resourceRepo) Create(
 		return nil, err
 	}
 
-	return client.Resource(gvr).Namespace(namespace).Create(ctx, obj, metav1.CreateOptions{})
+	result, err := client.Resource(gvr).Namespace(namespace).Create(ctx, obj, metav1.CreateOptions{})
+	return result, wrapK8sError(err)
 }
 
 // Apply performs a server-side apply (PATCH with ApplyPatchType) for
@@ -108,7 +111,8 @@ func (r *resourceRepo) Apply(
 		FieldManager: opts.FieldManager,
 	}
 
-	return client.Resource(gvr).Namespace(namespace).Patch(ctx, name, types.ApplyPatchType, data, patchOpts)
+	result, err := client.Resource(gvr).Namespace(namespace).Patch(ctx, name, types.ApplyPatchType, data, patchOpts)
+	return result, wrapK8sError(err)
 }
 
 // Delete removes a resource.
@@ -128,7 +132,7 @@ func (r *resourceRepo) Delete(
 		GracePeriodSeconds: opts.GracePeriodSeconds,
 	}
 
-	return client.Resource(gvr).Namespace(namespace).Delete(ctx, name, deleteOpts)
+	return wrapK8sError(client.Resource(gvr).Namespace(namespace).Delete(ctx, name, deleteOpts))
 }
 
 // ---------------------------------------------------------------------------
@@ -164,7 +168,8 @@ func (r *resourceRepo) Watch(
 		listOpts.SendInitialEvents = &opts.SendInitialEvents
 	}
 
-	return client.Resource(gvr).Namespace(namespace).Watch(ctx, listOpts)
+	result, err := client.Resource(gvr).Namespace(namespace).Watch(ctx, listOpts)
+	return result, wrapK8sError(err)
 }
 
 // ---------------------------------------------------------------------------
@@ -194,7 +199,8 @@ func (r *resourceRepo) ListEvents(
 		Continue:      opts.Continue,
 	}
 
-	return client.Resource(eventsGVR).Namespace(namespace).List(ctx, listOpts)
+	result, err := client.Resource(eventsGVR).Namespace(namespace).List(ctx, listOpts)
+	return result, wrapK8sError(err)
 }
 
 // ---------------------------------------------------------------------------

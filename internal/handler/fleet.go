@@ -1,7 +1,7 @@
-// Package app implements the ConnectRPC service handlers that form
+// Package handler implements the ConnectRPC service handlers that form
 // the server's public API. Each handler translates between protobuf
 // messages and the domain use-cases defined in package core.
-package app
+package handler
 
 import (
 	"cmp"
@@ -37,10 +37,10 @@ var _ pbconnect.FleetServiceHandler = (*FleetService)(nil)
 // ListClusters returns the names of all clusters that have a
 // registered agent.
 func (s *FleetService) ListClusters(ctx context.Context, req *pb.ListClustersRequest) (*pb.ListClustersResponse, error) {
-	clusters := s.fleet.ListClusters()
+	clusters := s.fleet.ListClusters(ctx)
 
 	resp := &pb.ListClustersResponse{}
-	resp.SetClusters(s.toProtoClusters(clusters))
+	resp.SetClusters(toProtoClusters(clusters))
 	return resp, nil
 }
 
@@ -49,9 +49,9 @@ func (s *FleetService) ListClusters(ctx context.Context, req *pb.ListClustersReq
 // certificate for mTLS. The response includes the server version so
 // agents can detect mismatches and self-update.
 func (s *FleetService) Register(ctx context.Context, req *pb.RegisterRequest) (*pb.RegisterResponse, error) {
-	reg, err := s.fleet.RegisterCluster(req.GetCluster(), req.GetAgentId(), req.GetAgentVersion(), req.GetCsr())
+	reg, err := s.fleet.RegisterCluster(ctx, req.GetCluster(), req.GetAgentId(), req.GetAgentVersion(), req.GetCsr())
 	if err != nil {
-		return nil, k8sErrorToConnectError(err)
+		return nil, domainErrorToConnectError(err)
 	}
 
 	resp := &pb.RegisterResponse{}
@@ -74,12 +74,12 @@ func (s *FleetService) GetAgentManifest(ctx context.Context, req *pb.GetAgentMan
 
 	cluster := req.GetCluster()
 
-	manifest, err := s.fleet.GenerateAgentManifest(cluster, userInfo.Subject)
+	manifest, err := s.fleet.GenerateAgentManifest(ctx, cluster, userInfo.Subject)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
 
-	url, err := s.fleet.IssueManifestURL(cluster, userInfo.Subject)
+	url, err := s.fleet.IssueManifestURL(ctx, cluster, userInfo.Subject)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
@@ -93,24 +93,24 @@ func (s *FleetService) GetAgentManifest(ctx context.Context, req *pb.GetAgentMan
 // VerifyManifestToken validates an HMAC-signed manifest token and
 // returns the embedded cluster name and user identity. Used by the
 // raw HTTP manifest endpoint.
-func (s *FleetService) VerifyManifestToken(token string) (cluster, userName string, err error) {
-	return s.fleet.VerifyManifestToken(token)
+func (s *FleetService) VerifyManifestToken(ctx context.Context, token string) (cluster, userName string, err error) {
+	return s.fleet.VerifyManifestToken(ctx, token)
 }
 
 // RenderManifest generates the agent installation manifest for the
 // given cluster and user. Used by the raw HTTP manifest endpoint
 // after token verification.
-func (s *FleetService) RenderManifest(cluster, userName string) (string, error) {
-	return s.fleet.GenerateAgentManifest(cluster, userName)
+func (s *FleetService) RenderManifest(ctx context.Context, cluster, userName string) (string, error) {
+	return s.fleet.GenerateAgentManifest(ctx, cluster, userName)
 }
 
 // toProtoClusters converts a map of cluster names to Cluster domain
 // objects into a sorted slice of protobuf Cluster messages. Results
 // are sorted by name to ensure deterministic ordering.
-func (s *FleetService) toProtoClusters(m map[string]core.Cluster) []*pb.Cluster {
+func toProtoClusters(m map[string]core.Cluster) []*pb.Cluster {
 	ret := make([]*pb.Cluster, 0, len(m))
 	for name, cluster := range m {
-		ret = append(ret, s.toProtoCluster(name, cluster))
+		ret = append(ret, toProtoCluster(name, cluster))
 	}
 	slices.SortFunc(ret, func(a, b *pb.Cluster) int {
 		return cmp.Compare(a.GetName(), b.GetName())
@@ -120,7 +120,7 @@ func (s *FleetService) toProtoClusters(m map[string]core.Cluster) []*pb.Cluster 
 
 // toProtoCluster converts a cluster name and its domain object into a
 // protobuf Cluster message.
-func (s *FleetService) toProtoCluster(name string, cluster core.Cluster) *pb.Cluster {
+func toProtoCluster(name string, cluster core.Cluster) *pb.Cluster {
 	ret := &pb.Cluster{}
 	ret.SetName(name)
 	ret.SetAgentVersion(cluster.AgentVersion)

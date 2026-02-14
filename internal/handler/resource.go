@@ -1,15 +1,15 @@
-package app
+package handler
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/structpb"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -50,10 +50,10 @@ var _ pbconnect.ResourceServiceHandler = (*ResourceService)(nil)
 func (s *ResourceService) Discovery(ctx context.Context, req *pb.DiscoveryRequest) (*pb.DiscoveryResponse, error) {
 	apiResources, err := s.resource.ServerResources(ctx, req.GetCluster())
 	if err != nil {
-		return nil, k8sErrorToConnectError(err)
+		return nil, domainErrorToConnectError(err)
 	}
 
-	pbAPIResources, err := s.toProtoAPIResources(apiResources)
+	pbAPIResources, err := toProtoAPIResources(apiResources)
 	if err != nil {
 		return nil, err
 	}
@@ -74,9 +74,9 @@ func (s *ResourceService) Schema(ctx context.Context, req *pb.SchemaRequest) (*s
 		req.GetKind(),
 	)
 	if err != nil {
-		return nil, k8sErrorToConnectError(err)
+		return nil, domainErrorToConnectError(err)
 	}
-	return s.toProtoStructFromJSONSchema(resolved)
+	return toProtoStructFromJSONSchema(resolved)
 }
 
 // ---------------------------------------------------------------------------
@@ -100,10 +100,10 @@ func (s *ResourceService) List(ctx context.Context, req *pb.ListRequest) (*pb.Li
 		},
 	)
 	if err != nil {
-		return nil, k8sErrorToConnectError(err)
+		return nil, domainErrorToConnectError(err)
 	}
 
-	pbResources, err := s.toProtoResources(resources.Items)
+	pbResources, err := toProtoResources(resources.Items)
 	if err != nil {
 		return nil, err
 	}
@@ -128,9 +128,9 @@ func (s *ResourceService) Get(ctx context.Context, req *pb.GetRequest) (*pb.Reso
 		req.GetName(),
 	)
 	if err != nil {
-		return nil, k8sErrorToConnectError(err)
+		return nil, domainErrorToConnectError(err)
 	}
-	return s.toProtoResource(resource.Object)
+	return toProtoResource(resource.Object)
 }
 
 // Create creates a new resource from the YAML manifest in the request.
@@ -145,9 +145,9 @@ func (s *ResourceService) Create(ctx context.Context, req *pb.CreateRequest) (*p
 		req.GetManifest(),
 	)
 	if err != nil {
-		return nil, k8sErrorToConnectError(err)
+		return nil, domainErrorToConnectError(err)
 	}
-	return s.toProtoResource(resource.Object)
+	return toProtoResource(resource.Object)
 }
 
 // Apply performs a server-side apply for the given resource.
@@ -167,9 +167,9 @@ func (s *ResourceService) Apply(ctx context.Context, req *pb.ApplyRequest) (*pb.
 		},
 	)
 	if err != nil {
-		return nil, k8sErrorToConnectError(err)
+		return nil, domainErrorToConnectError(err)
 	}
-	return s.toProtoResource(resource.Object)
+	return toProtoResource(resource.Object)
 }
 
 // Delete removes the named resource. An optional grace period may be
@@ -191,7 +191,7 @@ func (s *ResourceService) Delete(ctx context.Context, req *pb.DeleteRequest) (*e
 		req.GetName(),
 		opts,
 	); err != nil {
-		return nil, k8sErrorToConnectError(err)
+		return nil, domainErrorToConnectError(err)
 	}
 	return &emptypb.Empty{}, nil
 }
@@ -213,15 +213,15 @@ func (s *ResourceService) Describe(ctx context.Context, req *pb.DescribeRequest)
 		req.GetName(),
 	)
 	if err != nil {
-		return nil, k8sErrorToConnectError(err)
+		return nil, domainErrorToConnectError(err)
 	}
 
-	pbResource, err := s.toProtoResource(obj.Object)
+	pbResource, err := toProtoResource(obj.Object)
 	if err != nil {
 		return nil, err
 	}
 
-	pbEvents, err := s.toProtoResources(events.Items)
+	pbEvents, err := toProtoResources(events.Items)
 	if err != nil {
 		return nil, err
 	}
@@ -254,7 +254,7 @@ func (s *ResourceService) Watch(ctx context.Context, req *pb.WatchRequest, strea
 		},
 	)
 	if err != nil {
-		return k8sErrorToConnectError(err)
+		return domainErrorToConnectError(err)
 	}
 	defer watcher.Stop()
 
@@ -265,10 +265,10 @@ func (s *ResourceService) Watch(ctx context.Context, req *pb.WatchRequest, strea
 
 		case event, ok := <-watcher.ResultChan():
 			if !ok {
-				return k8sErrorToConnectError(apierrors.NewServiceUnavailable("watch closed"))
+				return connect.NewError(connect.CodeUnavailable, errors.New("watch closed"))
 			}
 
-			msg, ok := s.processEvent(event)
+			msg, ok := processEvent(event)
 			if !ok {
 				continue
 			}
@@ -287,7 +287,7 @@ func (s *ResourceService) Watch(ctx context.Context, req *pb.WatchRequest, strea
 // processEvent converts a single Kubernetes watch.Event into a
 // protobuf WatchEvent. Returns false if the event should be skipped
 // (e.g. unexpected type).
-func (s *ResourceService) processEvent(event watch.Event) (*pb.WatchEvent, bool) {
+func processEvent(event watch.Event) (*pb.WatchEvent, bool) {
 	switch event.Type {
 	case watch.Added, watch.Modified, watch.Deleted:
 		obj, ok := event.Object.(*unstructured.Unstructured)
@@ -296,14 +296,14 @@ func (s *ResourceService) processEvent(event watch.Event) (*pb.WatchEvent, bool)
 			return nil, false
 		}
 
-		resource, err := s.toProtoResource(obj.Object)
+		resource, err := toProtoResource(obj.Object)
 		if err != nil {
 			slog.Warn("watch: failed to convert resource to proto", "eventType", event.Type, "error", err)
 			return nil, false
 		}
 
 		ret := &pb.WatchEvent{}
-		ret.SetType(s.toProtoWatchEventType(event.Type))
+		ret.SetType(toProtoWatchEventType(event.Type))
 		ret.SetResource(resource)
 		return ret, true
 
@@ -327,7 +327,7 @@ func (s *ResourceService) processEvent(event watch.Event) (*pb.WatchEvent, bool)
 		if status, ok := event.Object.(*metav1.Status); ok {
 			statusMap, err := statusToMap(status)
 			if err == nil {
-				if resource, err := s.toProtoResource(statusMap); err == nil {
+				if resource, err := toProtoResource(statusMap); err == nil {
 					ret.SetResource(resource)
 				}
 			}
@@ -343,7 +343,7 @@ func (s *ResourceService) processEvent(event watch.Event) (*pb.WatchEvent, bool)
 // toProtoAPIResources flattens the Kubernetes APIResourceList slice
 // into a single []*pb.APIResource list, embedding the parsed
 // group/version into each entry.
-func (s *ResourceService) toProtoAPIResources(list []*metav1.APIResourceList) ([]*pb.APIResource, error) {
+func toProtoAPIResources(list []*metav1.APIResourceList) ([]*pb.APIResource, error) {
 	ret := []*pb.APIResource{}
 
 	for i := range list {
@@ -353,7 +353,7 @@ func (s *ResourceService) toProtoAPIResources(list []*metav1.APIResourceList) ([
 		}
 
 		for j := range list[i].APIResources {
-			ret = append(ret, s.toProtoAPIResource(gv, &list[i].APIResources[j]))
+			ret = append(ret, toProtoAPIResource(gv, &list[i].APIResources[j]))
 		}
 	}
 
@@ -362,7 +362,7 @@ func (s *ResourceService) toProtoAPIResources(list []*metav1.APIResourceList) ([
 
 // toProtoAPIResource converts a single Kubernetes APIResource into its
 // protobuf representation.
-func (s *ResourceService) toProtoAPIResource(gv schema.GroupVersion, r *metav1.APIResource) *pb.APIResource {
+func toProtoAPIResource(gv schema.GroupVersion, r *metav1.APIResource) *pb.APIResource {
 	ret := &pb.APIResource{}
 	ret.SetGroup(gv.Group)
 	ret.SetVersion(gv.Version)
@@ -377,7 +377,7 @@ func (s *ResourceService) toProtoAPIResource(gv schema.GroupVersion, r *metav1.A
 // toProtoStructFromJSONSchema serialises an OpenAPI spec.Schema to
 // JSON and re-parses it into a protobuf Struct so it can be returned
 // as a generic structured response.
-func (s *ResourceService) toProtoStructFromJSONSchema(js *spec.Schema) (*structpb.Struct, error) {
+func toProtoStructFromJSONSchema(js *spec.Schema) (*structpb.Struct, error) {
 	jsBytes, err := json.Marshal(js)
 	if err != nil {
 		return nil, err
@@ -393,11 +393,11 @@ func (s *ResourceService) toProtoStructFromJSONSchema(js *spec.Schema) (*structp
 
 // toProtoResources converts a slice of Unstructured objects into
 // protobuf Resource messages.
-func (s *ResourceService) toProtoResources(list []unstructured.Unstructured) ([]*pb.Resource, error) {
+func toProtoResources(list []unstructured.Unstructured) ([]*pb.Resource, error) {
 	ret := []*pb.Resource{}
 
 	for i := range list {
-		res, err := s.toProtoResource(list[i].Object)
+		res, err := toProtoResource(list[i].Object)
 		if err != nil {
 			return nil, err
 		}
@@ -410,7 +410,7 @@ func (s *ResourceService) toProtoResources(list []unstructured.Unstructured) ([]
 
 // toProtoResource wraps a raw Kubernetes object map in a protobuf
 // Resource message.
-func (s *ResourceService) toProtoResource(obj map[string]any) (*pb.Resource, error) {
+func toProtoResource(obj map[string]any) (*pb.Resource, error) {
 	object, err := structpb.NewStruct(obj)
 	if err != nil {
 		return nil, err
@@ -423,7 +423,7 @@ func (s *ResourceService) toProtoResource(obj map[string]any) (*pb.Resource, err
 
 // toProtoWatchEventType maps a Kubernetes watch.EventType to the
 // protobuf WatchEvent_Type enum.
-func (s *ResourceService) toProtoWatchEventType(t watch.EventType) pb.WatchEvent_Type {
+func toProtoWatchEventType(t watch.EventType) pb.WatchEvent_Type {
 	switch t {
 	case watch.Added:
 		return pb.WatchEvent_TYPE_ADDED

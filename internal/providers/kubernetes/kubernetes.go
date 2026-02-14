@@ -14,7 +14,6 @@ import (
 	"sync"
 	"time"
 
-	"connectrpc.com/authn"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/rest"
 
@@ -60,7 +59,7 @@ func New(tunnel core.TunnelProvider) *Kubernetes {
 // cluster through its tunnel address and impersonates the calling
 // user extracted from the request context.
 func (k *Kubernetes) impersonationConfig(ctx context.Context, cluster string) (*rest.Config, error) {
-	userInfo, ok := authn.GetInfo(ctx).(core.UserInfo)
+	userInfo, ok := core.UserInfoFromContext(ctx)
 	if !ok {
 		return nil, apierrors.NewUnauthorized("user info not found in context")
 	}
@@ -96,7 +95,7 @@ func (k *Kubernetes) impersonationConfig(ctx context.Context, cluster string) (*
 // set a pre-built Transport because SPDY executors and dialers need
 // to negotiate their own connection upgrade.
 func (k *Kubernetes) spdyConfig(ctx context.Context, cluster string) (*rest.Config, error) {
-	userInfo, ok := authn.GetInfo(ctx).(core.UserInfo)
+	userInfo, ok := core.UserInfoFromContext(ctx)
 	if !ok {
 		return nil, apierrors.NewUnauthorized("user info not found in context")
 	}

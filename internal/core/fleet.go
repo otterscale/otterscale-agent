@@ -159,14 +159,14 @@ func NewFleetUseCase(tunnel TunnelProvider, version Version, manifestCfg AgentMa
 }
 
 // ListClusters returns the names of all currently registered clusters.
-func (uc *FleetUseCase) ListClusters() map[string]Cluster {
+func (uc *FleetUseCase) ListClusters(_ context.Context) map[string]Cluster {
 	return uc.tunnel.ListClusters()
 }
 
 // RegisterCluster validates the inputs, forwards the agent's CSR to
 // the tunnel provider for signing, and returns the signed certificate,
 // CA certificate, tunnel endpoint, and the server's version.
-func (uc *FleetUseCase) RegisterCluster(cluster, agentID, agentVersion string, csrPEM []byte) (Registration, error) {
+func (uc *FleetUseCase) RegisterCluster(_ context.Context, cluster, agentID, agentVersion string, csrPEM []byte) (Registration, error) {
 	if cluster == "" {
 		return Registration{}, &ErrInvalidInput{Field: "cluster", Message: "must not be empty"}
 	}
@@ -205,7 +205,7 @@ func (uc *FleetUseCase) RegisterCluster(cluster, agentID, agentVersion string, c
 // cluster name and user identity, and returns a full URL that serves
 // the agent manifest as raw YAML. The token is valid for
 // manifestTokenTTL.
-func (uc *FleetUseCase) IssueManifestURL(cluster, userName string) (string, error) {
+func (uc *FleetUseCase) IssueManifestURL(_ context.Context, cluster, userName string) (string, error) {
 	token, err := uc.issueManifestToken(cluster, userName)
 	if err != nil {
 		return "", fmt.Errorf("issue manifest token: %w", err)
@@ -216,7 +216,7 @@ func (uc *FleetUseCase) IssueManifestURL(cluster, userName string) (string, erro
 // VerifyManifestToken validates the HMAC signature and expiry of a
 // manifest token and returns the embedded cluster name and user
 // identity.
-func (uc *FleetUseCase) VerifyManifestToken(token string) (cluster, userName string, err error) {
+func (uc *FleetUseCase) VerifyManifestToken(_ context.Context, token string) (cluster, userName string, err error) {
 	parts := strings.SplitN(token, ".", 2)
 	if len(parts) != 2 {
 		return "", "", fmt.Errorf("malformed token")
@@ -285,7 +285,7 @@ type manifestTokenClaims struct {
 // The manifest includes a Namespace, ServiceAccount,
 // ClusterRoleBinding (binding userName to cluster-admin), and a
 // Deployment that runs the agent with the correct server/tunnel URLs.
-func (uc *FleetUseCase) GenerateAgentManifest(cluster, userName string) (string, error) {
+func (uc *FleetUseCase) GenerateAgentManifest(_ context.Context, cluster, userName string) (string, error) {
 	if cluster == "" {
 		return "", &ErrInvalidInput{Field: "cluster", Message: "must not be empty"}
 	}

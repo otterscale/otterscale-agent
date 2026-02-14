@@ -18,20 +18,20 @@ import (
 	fleetv1 "github.com/otterscale/otterscale-agent/api/fleet/v1/pbconnect"
 	resourcev1 "github.com/otterscale/otterscale-agent/api/resource/v1/pbconnect"
 	runtimev1 "github.com/otterscale/otterscale-agent/api/runtime/v1/pbconnect"
-	"github.com/otterscale/otterscale-agent/internal/app"
+	"github.com/otterscale/otterscale-agent/internal/handler"
 )
 
 // Handler is responsible for mounting all gRPC service handlers,
 // interceptors, and operational endpoints (health, reflection,
 // metrics) onto an HTTP mux.
 type Handler struct {
-	fleet    *app.FleetService
-	resource *app.ResourceService
-	runtime  *app.RuntimeService
+	fleet    *handler.FleetService
+	resource *handler.ResourceService
+	runtime  *handler.RuntimeService
 }
 
 // NewHandler returns a Handler for the given gRPC services.
-func NewHandler(fleet *app.FleetService, resource *app.ResourceService, runtime *app.RuntimeService) *Handler {
+func NewHandler(fleet *handler.FleetService, resource *handler.ResourceService, runtime *handler.RuntimeService) *Handler {
 	return &Handler{
 		fleet:    fleet,
 		resource: resource,
@@ -85,14 +85,16 @@ func (h *Handler) Mount(mux *http.ServeMux) error {
 func (h *Handler) handleRawManifest(w http.ResponseWriter, r *http.Request) {
 	token := r.PathValue("token")
 
-	cluster, userName, err := h.fleet.VerifyManifestToken(token)
+	cluster, userName, err := h.fleet.VerifyManifestToken(r.Context(), token)
 	if err != nil {
+		slog.Debug("manifest token verification failed", "error", err)
 		http.Error(w, "invalid or expired token", http.StatusUnauthorized)
 		return
 	}
 
-	manifest, err := h.fleet.RenderManifest(cluster, userName)
+	manifest, err := h.fleet.RenderManifest(r.Context(), cluster, userName)
 	if err != nil {
+		slog.Debug("manifest render failed", "cluster", cluster, "user", userName, "error", err)
 		http.Error(w, "failed to render manifest", http.StatusInternalServerError)
 		return
 	}

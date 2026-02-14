@@ -1,6 +1,58 @@
 package core
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
+
+// ErrorCode represents a domain-level error category that abstracts
+// away infrastructure-specific error codes (e.g. K8s StatusReason).
+// The handler layer maps these codes to transport-level codes
+// (e.g. ConnectRPC codes).
+type ErrorCode int
+
+const (
+	ErrorCodeInternal          ErrorCode = iota // catch-all
+	ErrorCodeInvalidArgument                    // bad input
+	ErrorCodeNotFound                           // resource missing
+	ErrorCodeAlreadyExists                      // duplicate
+	ErrorCodeUnauthenticated                    // no/invalid creds
+	ErrorCodePermissionDenied                   // forbidden
+	ErrorCodeFailedPrecondition                 // conflict / precondition
+	ErrorCodeDeadlineExceeded                   // timeout
+	ErrorCodeResourceExhausted                  // rate-limit / quota
+	ErrorCodeUnimplemented                      // method not allowed
+	ErrorCodeUnavailable                        // service unavailable
+)
+
+// DomainError is a generic domain error carrying an ErrorCode and an
+// optional cause. Infrastructure adapters wrap external errors into
+// DomainErrors so that the handler layer only needs to understand
+// domain-level codes, not infrastructure-specific error types.
+type DomainError struct {
+	Code    ErrorCode
+	Message string
+	Cause   error
+}
+
+func (e *DomainError) Error() string {
+	if e.Cause != nil {
+		return fmt.Sprintf("%s: %v", e.Message, e.Cause)
+	}
+	return e.Message
+}
+
+func (e *DomainError) Unwrap() error { return e.Cause }
+
+// DomainErrorCode extracts the ErrorCode from an error if it is a
+// *DomainError. Returns ErrorCodeInternal and false for non-domain errors.
+func DomainErrorCode(err error) (ErrorCode, bool) {
+	var de *DomainError
+	if errors.As(err, &de) {
+		return de.Code, true
+	}
+	return ErrorCodeInternal, false
+}
 
 // ErrClusterNotFound indicates that the requested cluster is not
 // registered with the tunnel provider.

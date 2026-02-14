@@ -28,25 +28,11 @@ type Config struct {
 // scans for and removes stale sessions.
 const sessionReapInterval = 30 * time.Second
 
-// TunnelService provides the tunnel infrastructure needed by the
-// server for transport setup and health monitoring. The interface is
-// defined at the consumer side (server package) following Go
-// conventions, decoupling the server from concrete implementations
-// such as chisel.Service.
-type TunnelService interface {
-	// BuildTunnelListener creates a fully configured tunnel server
-	// listener for the given address and host SAN.
-	BuildTunnelListener(address, host string) (transport.Listener, error)
-	// BuildHealthListener returns a transport.Listener that performs
-	// periodic health checks on registered tunnel endpoints.
-	BuildHealthListener() transport.Listener
-}
-
 // Server binds an HTTP server (gRPC + REST) and a chisel tunnel
 // listener, running them in parallel via transport.Serve.
 type Server struct {
 	handler *Handler
-	tunnel  TunnelService
+	tunnel  transport.TunnelService
 	runtime *core.RuntimeUseCase
 }
 
@@ -54,7 +40,7 @@ type Server struct {
 // service. The TunnelService interface decouples the server from
 // concrete tunnel implementations, keeping infrastructure details
 // behind the interface boundary.
-func NewServer(handler *Handler, tunnel TunnelService, runtime *core.RuntimeUseCase) *Server {
+func NewServer(handler *Handler, tunnel transport.TunnelService, runtime *core.RuntimeUseCase) *Server {
 	return &Server{handler: handler, tunnel: tunnel, runtime: runtime}
 }
 
