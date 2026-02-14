@@ -86,6 +86,10 @@ message GetAgentManifestResponse {
   // Multi-document YAML containing Namespace, ServiceAccount,
   // ClusterRoleBinding, and Deployment resources.
   string manifest = 1;
+
+  // URL with an embedded HMAC token that serves the manifest as raw
+  // YAML. Users can run `kubectl apply -f <url>` directly.
+  string url = 2;
 }
 
 // RegisterResponse contains a CA-signed certificate and the CA

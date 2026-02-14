@@ -72,14 +72,36 @@ func (s *FleetService) GetAgentManifest(ctx context.Context, req *pb.GetAgentMan
 		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("user info not found in context"))
 	}
 
-	manifest, err := s.fleet.GenerateAgentManifest(req.GetCluster(), userInfo.Subject)
+	cluster := req.GetCluster()
+
+	manifest, err := s.fleet.GenerateAgentManifest(cluster, userInfo.Subject)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
 
+	url, err := s.fleet.IssueManifestURL(cluster, userInfo.Subject)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+
 	resp := &pb.GetAgentManifestResponse{}
 	resp.SetManifest(manifest)
+	resp.SetUrl(url)
 	return resp, nil
+}
+
+// VerifyManifestToken validates an HMAC-signed manifest token and
+// returns the embedded cluster name and user identity. Used by the
+// raw HTTP manifest endpoint.
+func (s *FleetService) VerifyManifestToken(token string) (cluster, userName string, err error) {
+	return s.fleet.VerifyManifestToken(token)
+}
+
+// RenderManifest generates the agent installation manifest for the
+// given cluster and user. Used by the raw HTTP manifest endpoint
+// after token verification.
+func (s *FleetService) RenderManifest(cluster, userName string) (string, error) {
+	return s.fleet.GenerateAgentManifest(cluster, userName)
 }
 
 // toProtoClusters converts a map of cluster names to Cluster domain

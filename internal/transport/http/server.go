@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"connectrpc.com/authn"
@@ -24,14 +25,15 @@ type ServerOption func(*Server)
 // Server is an HTTP/H2C server with optional CORS and authentication
 // middleware. It implements transport.Listener.
 type Server struct {
-	inner          *http.Server
-	address        string
-	listener       net.Listener
-	mount          MountFunc
-	authMiddleware *authn.Middleware
-	publicPaths    map[string]struct{}
-	allowedOrigins []string
-	log            *slog.Logger
+	inner              *http.Server
+	address            string
+	listener           net.Listener
+	mount              MountFunc
+	authMiddleware     *authn.Middleware
+	publicPaths        map[string]struct{}
+	publicPathPrefixes []string
+	allowedOrigins     []string
+	log                *slog.Logger
 }
 
 // WithAddress configures the listen address (e.g. ":8299").
@@ -74,6 +76,24 @@ func WithPublicPaths(paths []string) ServerOption {
 				p = "/" + p
 			}
 			s.publicPaths[p] = struct{}{}
+		}
+	}
+}
+
+// WithPublicPathPrefixes configures path prefixes that bypass
+// authentication. Any request whose path starts with one of these
+// prefixes is served without OIDC token verification. Prefixes are
+// normalised to always include a leading "/".
+func WithPublicPathPrefixes(prefixes []string) ServerOption {
+	return func(s *Server) {
+		for _, p := range prefixes {
+			if p == "" {
+				continue
+			}
+			if p[0] != '/' {
+				p = "/" + p
+			}
+			s.publicPathPrefixes = append(s.publicPathPrefixes, p)
 		}
 	}
 }
@@ -204,18 +224,33 @@ func (s *Server) buildHandler() (http.Handler, error) {
 }
 
 // wrapAuth applies the authn middleware, skipping public paths.
+// Public paths are checked by exact match first, then by prefix.
 func (s *Server) wrapAuth(mux *http.ServeMux, next http.Handler) http.Handler {
 	protected := s.authMiddleware.Wrap(next)
-	if len(s.publicPaths) == 0 {
+	if len(s.publicPaths) == 0 && len(s.publicPathPrefixes) == 0 {
 		return protected
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := s.publicPaths[r.URL.Path]; ok {
+		if s.isPublicPath(r.URL.Path) {
 			mux.ServeHTTP(w, r)
 			return
 		}
 		protected.ServeHTTP(w, r)
 	})
+}
+
+// isPublicPath returns true if the given path matches an exact public
+// path or starts with a registered public path prefix.
+func (s *Server) isPublicPath(path string) bool {
+	if _, ok := s.publicPaths[path]; ok {
+		return true
+	}
+	for _, prefix := range s.publicPathPrefixes {
+		if strings.HasPrefix(path, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // wrapCORS applies CORS headers. When no origins are configured

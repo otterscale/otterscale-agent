@@ -6,10 +6,15 @@ package core
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
 	"text/template"
+	"time"
 )
 
 // TunnelProvider is the server-side abstraction for managing reverse
@@ -75,9 +80,13 @@ type Cluster struct {
 	AgentVersion string // agent binary version
 }
 
-// AgentManifestConfig holds the external URLs needed to generate
-// agent installation manifests. These are the advertised endpoints
-// that agents connect to from outside the cluster.
+// manifestTokenTTL is the validity period of HMAC-signed manifest
+// tokens. After this duration the token expires and a new one must
+// be issued via the GetAgentManifest RPC.
+const manifestTokenTTL = 1 * time.Hour
+
+// AgentManifestConfig holds the external URLs and HMAC key needed to
+// generate agent installation manifests and sign manifest tokens.
 type AgentManifestConfig struct {
 	// ServerURL is the externally reachable URL of the control-plane
 	// server (e.g. "https://otterscale.example.com").
@@ -85,6 +94,9 @@ type AgentManifestConfig struct {
 	// TunnelURL is the externally reachable URL of the tunnel server
 	// (e.g. "https://tunnel.example.com:8300").
 	TunnelURL string
+	// HMACKey is a 32-byte key derived from the CA seed via HKDF.
+	// It is used to sign and verify stateless manifest tokens.
+	HMACKey []byte
 }
 
 // FleetUseCase orchestrates cluster registration on the server side.
@@ -127,6 +139,85 @@ func (uc *FleetUseCase) RegisterCluster(cluster, agentID, agentVersion string, c
 		CACertificate: uc.tunnel.CACertPEM(),
 		ServerVersion: string(uc.version),
 	}, nil
+}
+
+// IssueManifestURL generates an HMAC-signed token that encodes the
+// cluster name and user identity, and returns a full URL that serves
+// the agent manifest as raw YAML. The token is valid for
+// manifestTokenTTL.
+func (uc *FleetUseCase) IssueManifestURL(cluster, userName string) (string, error) {
+	token, err := uc.issueManifestToken(cluster, userName)
+	if err != nil {
+		return "", fmt.Errorf("issue manifest token: %w", err)
+	}
+	return strings.TrimRight(uc.manifestCfg.ServerURL, "/") + "/fleet/manifest/" + token, nil
+}
+
+// VerifyManifestToken validates the HMAC signature and expiry of a
+// manifest token and returns the embedded cluster name and user
+// identity.
+func (uc *FleetUseCase) VerifyManifestToken(token string) (cluster, userName string, err error) {
+	parts := strings.SplitN(token, ".", 2)
+	if len(parts) != 2 {
+		return "", "", fmt.Errorf("malformed token")
+	}
+
+	payloadBytes, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		return "", "", fmt.Errorf("decode payload: %w", err)
+	}
+
+	sig, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return "", "", fmt.Errorf("decode signature: %w", err)
+	}
+
+	// Verify HMAC before trusting any payload content.
+	mac := hmac.New(sha256.New, uc.manifestCfg.HMACKey)
+	mac.Write(payloadBytes)
+	if !hmac.Equal(sig, mac.Sum(nil)) {
+		return "", "", fmt.Errorf("invalid token signature")
+	}
+
+	var claims manifestTokenClaims
+	if err := json.Unmarshal(payloadBytes, &claims); err != nil {
+		return "", "", fmt.Errorf("parse token claims: %w", err)
+	}
+
+	if time.Now().Unix() > claims.Exp {
+		return "", "", fmt.Errorf("token expired")
+	}
+
+	return claims.Cluster, claims.Sub, nil
+}
+
+// issueManifestToken creates a signed token containing the user
+// identity, cluster name, and expiry timestamp.
+func (uc *FleetUseCase) issueManifestToken(cluster, userName string) (string, error) {
+	claims := manifestTokenClaims{
+		Sub:     userName,
+		Cluster: cluster,
+		Exp:     time.Now().Add(manifestTokenTTL).Unix(),
+	}
+
+	payload, err := json.Marshal(claims)
+	if err != nil {
+		return "", fmt.Errorf("marshal token claims: %w", err)
+	}
+
+	mac := hmac.New(sha256.New, uc.manifestCfg.HMACKey)
+	mac.Write(payload)
+	sig := mac.Sum(nil)
+
+	return base64.RawURLEncoding.EncodeToString(payload) + "." +
+		base64.RawURLEncoding.EncodeToString(sig), nil
+}
+
+// manifestTokenClaims is the JSON payload embedded in manifest tokens.
+type manifestTokenClaims struct {
+	Sub     string `json:"sub"`
+	Cluster string `json:"cluster"`
+	Exp     int64  `json:"exp"`
 }
 
 // GenerateAgentManifest produces a multi-document YAML manifest for

@@ -109,6 +109,9 @@ func (s *Server) Run(ctx context.Context, cfg Config) error {
 			"/grpc.reflection.v1.ServerReflection/ServerReflectionInfo",
 			fleetv1.FleetServiceRegisterProcedure,
 		}),
+		http.WithPublicPathPrefixes([]string{
+			"/fleet/manifest/",
+		}),
 		http.WithMount(s.handler.Mount),
 	)
 	if err != nil {

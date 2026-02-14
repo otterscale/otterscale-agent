@@ -509,6 +509,7 @@ func (b0 GetAgentManifestRequest_builder) Build() *GetAgentManifestRequest {
 type GetAgentManifestResponse struct {
 	state                  protoimpl.MessageState `protogen:"opaque.v1"`
 	xxx_hidden_Manifest    *string                `protobuf:"bytes,1,opt,name=manifest"`
+	xxx_hidden_Url         *string                `protobuf:"bytes,2,opt,name=url"`
 	XXX_raceDetectHookData protoimpl.RaceDetectHookData
 	XXX_presence           [1]uint32
 	unknownFields          protoimpl.UnknownFields
@@ -550,9 +551,24 @@ func (x *GetAgentManifestResponse) GetManifest() string {
 	return ""
 }
 
+func (x *GetAgentManifestResponse) GetUrl() string {
+	if x != nil {
+		if x.xxx_hidden_Url != nil {
+			return *x.xxx_hidden_Url
+		}
+		return ""
+	}
+	return ""
+}
+
 func (x *GetAgentManifestResponse) SetManifest(v string) {
 	x.xxx_hidden_Manifest = &v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 0, 1)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 0, 2)
+}
+
+func (x *GetAgentManifestResponse) SetUrl(v string) {
+	x.xxx_hidden_Url = &v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 1, 2)
 }
 
 func (x *GetAgentManifestResponse) HasManifest() bool {
@@ -562,9 +578,21 @@ func (x *GetAgentManifestResponse) HasManifest() bool {
 	return protoimpl.X.Present(&(x.XXX_presence[0]), 0)
 }
 
+func (x *GetAgentManifestResponse) HasUrl() bool {
+	if x == nil {
+		return false
+	}
+	return protoimpl.X.Present(&(x.XXX_presence[0]), 1)
+}
+
 func (x *GetAgentManifestResponse) ClearManifest() {
 	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 0)
 	x.xxx_hidden_Manifest = nil
+}
+
+func (x *GetAgentManifestResponse) ClearUrl() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 1)
+	x.xxx_hidden_Url = nil
 }
 
 type GetAgentManifestResponse_builder struct {
@@ -573,6 +601,9 @@ type GetAgentManifestResponse_builder struct {
 	// Multi-document YAML containing Namespace, ServiceAccount,
 	// ClusterRoleBinding, and Deployment resources.
 	Manifest *string
+	// URL with an embedded HMAC token that serves the manifest as raw
+	// YAML. Users can run `kubectl apply -f <url>` directly.
+	Url *string
 }
 
 func (b0 GetAgentManifestResponse_builder) Build() *GetAgentManifestResponse {
@@ -580,8 +611,12 @@ func (b0 GetAgentManifestResponse_builder) Build() *GetAgentManifestResponse {
 	b, x := &b0, m0
 	_, _ = b, x
 	if b.Manifest != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 0, 1)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 0, 2)
 		x.xxx_hidden_Manifest = b.Manifest
+	}
+	if b.Url != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 1, 2)
+		x.xxx_hidden_Url = b.Url
 	}
 	return m0
 }
@@ -788,9 +823,10 @@ const file_api_fleet_v1_fleet_proto_rawDesc = "" +
 	"\bagent_id\x18\x03 \x01(\tR\aagentId\x12#\n" +
 	"\ragent_version\x18\x04 \x01(\tR\fagentVersion\"3\n" +
 	"\x17GetAgentManifestRequest\x12\x18\n" +
-	"\acluster\x18\x01 \x01(\tR\acluster\"6\n" +
+	"\acluster\x18\x01 \x01(\tR\acluster\"H\n" +
 	"\x18GetAgentManifestResponse\x12\x1a\n" +
-	"\bmanifest\x18\x01 \x01(\tR\bmanifest\"\x9e\x01\n" +
+	"\bmanifest\x18\x01 \x01(\tR\bmanifest\x12\x10\n" +
+	"\x03url\x18\x02 \x01(\tR\x03url\"\x9e\x01\n" +
 	"\x10RegisterResponse\x12\x1a\n" +
 	"\bendpoint\x18\x01 \x01(\tR\bendpoint\x12 \n" +
 	"\vcertificate\x18\x02 \x01(\fR\vcertificate\x12%\n" +

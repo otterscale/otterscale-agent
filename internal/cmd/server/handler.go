@@ -70,7 +70,34 @@ func (h *Handler) Mount(mux *http.ServeMux) error {
 	mux.Handle(resourcev1.NewResourceServiceHandler(h.resource, interceptors))
 	mux.Handle(runtimev1.NewRuntimeServiceHandler(h.runtime, interceptors))
 
+	// Raw YAML endpoint for kubectl apply -f. Authentication is
+	// handled by the HMAC token embedded in the URL path, so this
+	// route is registered as a public path prefix in server.go.
+	mux.HandleFunc("GET /fleet/manifest/{token}", h.handleRawManifest)
+
 	return nil
+}
+
+// handleRawManifest verifies the HMAC token in the URL path and
+// returns the agent installation manifest as raw YAML. This enables
+// `kubectl apply -f <url>` without additional authentication headers.
+func (h *Handler) handleRawManifest(w http.ResponseWriter, r *http.Request) {
+	token := r.PathValue("token")
+
+	cluster, userName, err := h.fleet.VerifyManifestToken(token)
+	if err != nil {
+		http.Error(w, "invalid or expired token", http.StatusUnauthorized)
+		return
+	}
+
+	manifest, err := h.fleet.RenderManifest(cluster, userName)
+	if err != nil {
+		http.Error(w, "failed to render manifest", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/yaml; charset=utf-8")
+	w.Write([]byte(manifest))
 }
 
 // registerOpsHandlers sets up gRPC reflection, health checks, and
