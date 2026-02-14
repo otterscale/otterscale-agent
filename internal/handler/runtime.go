@@ -97,17 +97,16 @@ func (s *RuntimeService) PodLog(ctx context.Context, req *pb.PodLogRequest, stre
 // contains the session_id that the client must use for WriteTTY
 // and ResizeTTY calls.
 func (s *RuntimeService) ExecuteTTY(ctx context.Context, req *pb.ExecuteTTYRequest, stream *connect.ServerStream[pb.ExecuteTTYResponse]) error {
-	sess, stdoutR, stderrR, err := s.runtime.StartExec(
-		ctx,
-		req.GetCluster(),
-		req.GetNamespace(),
-		req.GetName(),
-		req.GetContainer(),
-		req.GetCommand(),
-		req.GetTty(),
-		uint16(req.GetRows()),
-		uint16(req.GetCols()),
-	)
+	sess, stdoutR, stderrR, err := s.runtime.StartExec(ctx, core.StartExecParams{
+		Cluster:   req.GetCluster(),
+		Namespace: req.GetNamespace(),
+		Name:      req.GetName(),
+		Container: req.GetContainer(),
+		Command:   req.GetCommand(),
+		TTY:       req.GetTty(),
+		Rows:      uint16(req.GetRows()),
+		Cols:      uint16(req.GetCols()),
+	})
 	if err != nil {
 		return domainErrorToConnectError(err)
 	}

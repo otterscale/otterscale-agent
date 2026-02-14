@@ -38,9 +38,9 @@ type TunnelProvider interface {
 	// RegisterCluster validates and signs the agent's CSR, creates
 	// a tunnel user, and returns the allocated endpoint together
 	// with the PEM-encoded signed certificate.
-	RegisterCluster(cluster, agentID, agentVersion string, csrPEM []byte) (endpoint string, certPEM []byte, err error)
+	RegisterCluster(ctx context.Context, cluster, agentID, agentVersion string, csrPEM []byte) (endpoint string, certPEM []byte, err error)
 	// ResolveAddress returns the HTTP base URL for the given cluster.
-	ResolveAddress(cluster string) (string, error)
+	ResolveAddress(ctx context.Context, cluster string) (string, error)
 }
 
 // TunnelConsumer is the agent-side abstraction for registering with
@@ -166,7 +166,7 @@ func (uc *FleetUseCase) ListClusters(_ context.Context) map[string]Cluster {
 // RegisterCluster validates the inputs, forwards the agent's CSR to
 // the tunnel provider for signing, and returns the signed certificate,
 // CA certificate, tunnel endpoint, and the server's version.
-func (uc *FleetUseCase) RegisterCluster(_ context.Context, cluster, agentID, agentVersion string, csrPEM []byte) (Registration, error) {
+func (uc *FleetUseCase) RegisterCluster(ctx context.Context, cluster, agentID, agentVersion string, csrPEM []byte) (Registration, error) {
 	if cluster == "" {
 		return Registration{}, &ErrInvalidInput{Field: "cluster", Message: "must not be empty"}
 	}
@@ -189,7 +189,7 @@ func (uc *FleetUseCase) RegisterCluster(_ context.Context, cluster, agentID, age
 		return Registration{}, &ErrInvalidInput{Field: "csr", Message: "must not be empty"}
 	}
 
-	endpoint, certPEM, err := uc.tunnel.RegisterCluster(cluster, agentID, agentVersion, csrPEM)
+	endpoint, certPEM, err := uc.tunnel.RegisterCluster(ctx, cluster, agentID, agentVersion, csrPEM)
 	if err != nil {
 		return Registration{}, err
 	}

@@ -22,10 +22,10 @@ func (m *mockTunnelProvider) ListClusters() map[string]Cluster {
 	}
 	return m.clusters
 }
-func (m *mockTunnelProvider) RegisterCluster(_, _, _ string, _ []byte) (string, []byte, error) {
+func (m *mockTunnelProvider) RegisterCluster(_ context.Context, _, _, _ string, _ []byte) (string, []byte, error) {
 	return m.regEndpoint, m.regCertPEM, m.regErr
 }
-func (m *mockTunnelProvider) ResolveAddress(_ string) (string, error) {
+func (m *mockTunnelProvider) ResolveAddress(_ context.Context, _ string) (string, error) {
 	return "", nil
 }
 

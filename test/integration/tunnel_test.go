@@ -50,11 +50,11 @@ func TestFleetRegisterClusterUsesSingleSharedTunnelPort(t *testing.T) {
 		t.Fatalf("expected distinct endpoints for different clusters, got %q", regA.Endpoint)
 	}
 
-	addrA, err := tunnel.ResolveAddress("cluster-a")
+	addrA, err := tunnel.ResolveAddress(ctx, "cluster-a")
 	if err != nil {
 		t.Fatalf("resolve cluster-a: %v", err)
 	}
-	addrB, err := tunnel.ResolveAddress("cluster-b")
+	addrB, err := tunnel.ResolveAddress(ctx, "cluster-b")
 	if err != nil {
 		t.Fatalf("resolve cluster-b: %v", err)
 	}
@@ -88,7 +88,7 @@ func TestFleetRegisterClusterLatestAgentWinsForSameCluster(t *testing.T) {
 
 	// After re-registration the route must resolve to the latest
 	// agent's endpoint regardless of whether the host was reused.
-	addr, err := tunnel.ResolveAddress("cluster-r")
+	addr, err := tunnel.ResolveAddress(ctx, "cluster-r")
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -128,7 +128,7 @@ func TestFleetRegisterClusterReregisterAndReplaceAcrossAgents(t *testing.T) {
 
 	// After re-registration for the same cluster, the route must
 	// resolve to the latest agent's endpoint.
-	addrB, err := tunnel.ResolveAddress("cluster-z")
+	addrB, err := tunnel.ResolveAddress(ctx, "cluster-z")
 	if err != nil {
 		t.Fatalf("resolve after agent-b register: %v", err)
 	}
@@ -156,7 +156,7 @@ func TestFleetRegisterClusterReregisterAndReplaceAcrossAgents(t *testing.T) {
 	}
 
 	for i := 0; i < 3; i++ {
-		addr, err := tunnel.ResolveAddress("cluster-z")
+		addr, err := tunnel.ResolveAddress(ctx, "cluster-z")
 		if err != nil {
 			t.Fatalf("resolve #%d: %v", i+1, err)
 		}

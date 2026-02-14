@@ -181,37 +181,51 @@ func (s *SessionStore) DeletePortForward(id string) {
 // ReapStaleSessions scans all sessions and removes those whose Done
 // channel has already been closed (goroutine finished). This prevents
 // session leaks when clients disconnect without calling Cleanup.
+//
+// The cleanup is split into two phases: the map mutations happen under
+// the write lock, but the potentially blocking Cancel/Close calls
+// happen after the lock is released. This avoids deadlocking with
+// goroutines that hold a pipe write and are waiting for a session
+// store read lock.
 func (s *SessionStore) ReapStaleSessions() int {
-	reaped := 0
-
+	// Phase 1: identify and remove stale sessions under the lock.
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
+	var staleExec []*ExecSession
 	for id, sess := range s.execSess {
 		select {
 		case <-sess.Done:
-			sess.Cancel()
-			if err := sess.Stdin.Close(); err != nil {
-				slog.Warn("failed to close exec stdin", "session", id, "error", err)
-			}
+			staleExec = append(staleExec, sess)
 			delete(s.execSess, id)
-			reaped++
 		default:
 		}
 	}
 
+	var stalePF []*PortForwardSession
 	for id, sess := range s.pfSess {
 		select {
 		case <-sess.Done:
-			sess.Cancel()
-			if err := sess.Writer.Close(); err != nil {
-				slog.Warn("failed to close port-forward writer", "session", id, "error", err)
-			}
+			stalePF = append(stalePF, sess)
 			delete(s.pfSess, id)
-			reaped++
 		default:
 		}
 	}
 
-	return reaped
+	s.mu.Unlock()
+
+	// Phase 2: cancel and close resources outside the lock.
+	for _, sess := range staleExec {
+		sess.Cancel()
+		if err := sess.Stdin.Close(); err != nil {
+			slog.Warn("failed to close exec stdin", "session", sess.ID, "error", err)
+		}
+	}
+	for _, sess := range stalePF {
+		sess.Cancel()
+		if err := sess.Writer.Close(); err != nil {
+			slog.Warn("failed to close port-forward writer", "session", sess.ID, "error", err)
+		}
+	}
+
+	return len(staleExec) + len(stalePF)
 }

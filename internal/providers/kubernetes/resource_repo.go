@@ -2,10 +2,12 @@ package kubernetes
 
 import (
 	"context"
+	"fmt"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/runtime/serializer/yaml"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic"
@@ -73,15 +75,20 @@ func (r *resourceRepo) Get(
 	return result, wrapK8sError(err)
 }
 
-// Create creates a new resource from the given object.
+// Create decodes a YAML manifest and creates the resource.
 func (r *resourceRepo) Create(
 	ctx context.Context,
 	cluster string,
 	gvr schema.GroupVersionResource,
 	namespace string,
-	obj *unstructured.Unstructured,
+	manifest []byte,
 ) (*unstructured.Unstructured, error) {
 	client, err := r.client(ctx, cluster)
+	if err != nil {
+		return nil, err
+	}
+
+	obj, err := fromYAML(manifest)
 	if err != nil {
 		return nil, err
 	}
@@ -90,20 +97,30 @@ func (r *resourceRepo) Create(
 	return result, wrapK8sError(err)
 }
 
-// Apply performs a server-side apply (PATCH with ApplyPatchType) for
-// the given resource. When force is true, conflicts are resolved in
-// favour of the caller's field manager.
+// Apply decodes a YAML manifest, converts it to JSON, and performs a
+// server-side apply (PATCH with ApplyPatchType). When force is true,
+// conflicts are resolved in favour of the caller's field manager.
 func (r *resourceRepo) Apply(
 	ctx context.Context,
 	cluster string,
 	gvr schema.GroupVersionResource,
 	namespace, name string,
-	data []byte,
+	manifest []byte,
 	opts core.ApplyOptions,
 ) (*unstructured.Unstructured, error) {
 	client, err := r.client(ctx, cluster)
 	if err != nil {
 		return nil, err
+	}
+
+	obj, err := fromYAML(manifest)
+	if err != nil {
+		return nil, err
+	}
+
+	data, err := obj.MarshalJSON()
+	if err != nil {
+		return nil, &core.DomainError{Code: core.ErrorCodeInternal, Message: "marshal manifest to JSON", Cause: err}
 	}
 
 	patchOpts := metav1.PatchOptions{
@@ -214,4 +231,17 @@ func (r *resourceRepo) client(ctx context.Context, cluster string) (*dynamic.Dyn
 		return nil, err
 	}
 	return dynamic.NewForConfig(config)
+}
+
+// fromYAML decodes a YAML manifest into an Unstructured object.
+// Returns a domain validation error if the manifest is invalid.
+func fromYAML(manifest []byte) (*unstructured.Unstructured, error) {
+	dec := yaml.NewDecodingSerializer(unstructured.UnstructuredJSONScheme)
+	obj := &unstructured.Unstructured{}
+
+	if _, _, err := dec.Decode(manifest, nil, obj); err != nil {
+		return nil, &core.ErrInvalidInput{Field: "manifest", Message: fmt.Sprintf("invalid YAML: %s", err)}
+	}
+
+	return obj, nil
 }

@@ -3,16 +3,11 @@ package core
 import (
 	"context"
 	"fmt"
-	"strings"
-	"sync"
 	"time"
 
-	"github.com/Masterminds/semver/v3"
-	"golang.org/x/sync/singleflight"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/runtime/serializer/yaml"
 	"k8s.io/apimachinery/pkg/version"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/kube-openapi/pkg/validation/spec"
@@ -35,6 +30,9 @@ type DiscoveryClient interface {
 	ResolveSchema(ctx context.Context, cluster, group, version, kind string) (*spec.Schema, error)
 	// ServerVersion returns the Kubernetes version of the cluster.
 	ServerVersion(ctx context.Context, cluster string) (*version.Info, error)
+	// SupportsWatchList reports whether the target cluster supports
+	// the WatchList streaming feature (Kubernetes >= 1.34).
+	SupportsWatchList(ctx context.Context, cluster string) (bool, error)
 }
 
 // ResourceRepo abstracts Kubernetes resource CRUD and watch operations
@@ -52,15 +50,15 @@ type ResourceRepo interface {
 		namespace, name string,
 	) (*unstructured.Unstructured, error)
 
-	// Create creates a new resource from the given object.
+	// Create decodes a YAML manifest and creates a new resource.
 	Create(ctx context.Context, cluster string, gvr schema.GroupVersionResource,
-		namespace string, obj *unstructured.Unstructured,
+		namespace string, manifest []byte,
 	) (*unstructured.Unstructured, error)
 
-	// Apply performs a server-side apply (PATCH with ApplyPatchType) for
-	// the given resource.
+	// Apply decodes a YAML manifest and performs a server-side apply
+	// (PATCH with ApplyPatchType) for the given resource.
 	Apply(ctx context.Context, cluster string, gvr schema.GroupVersionResource,
-		namespace, name string, data []byte, opts ApplyOptions,
+		namespace, name string, manifest []byte, opts ApplyOptions,
 	) (*unstructured.Unstructured, error)
 
 	// Delete removes a resource.
@@ -115,28 +113,12 @@ type WatchOptions struct {
 }
 
 // ---------------------------------------------------------------------------
-// Cache types
+// Cache constants
 // ---------------------------------------------------------------------------
 
-// schemaCacheTTL controls how long resolved OpenAPI schemas are kept
-// in memory before being re-fetched from the cluster.
-const schemaCacheTTL = 10 * time.Minute
-
-// minWatchListVersion is the minimum Kubernetes version that supports
-// the WatchList streaming feature (beta, default-on since 1.34).
-var minWatchListVersion = semver.MustParse("v1.34.0")
-
-// schemaCacheEntry pairs a cached schema with its expiration time.
-type schemaCacheEntry struct {
-	schema    *spec.Schema
-	expiresAt time.Time
-}
-
-// versionCacheEntry pairs a cached server version with its expiration.
-type versionCacheEntry struct {
-	version   *version.Info
-	expiresAt time.Time
-}
+// discoveryCacheTTL controls how long resolved OpenAPI schemas and
+// server versions are kept in memory before being re-fetched.
+const discoveryCacheTTL = 10 * time.Minute
 
 // ---------------------------------------------------------------------------
 // Use case
@@ -150,22 +132,16 @@ type versionCacheEntry struct {
 type ResourceUseCase struct {
 	discovery DiscoveryClient
 	resource  ResourceRepo
-
-	mu             sync.RWMutex
-	schemaCache    map[string]*schemaCacheEntry
-	versionCache   map[string]*versionCacheEntry
-	schemaFlights  singleflight.Group
-	versionFlights singleflight.Group
+	cache     *discoveryCache
 }
 
 // NewResourceUseCase returns a ResourceUseCase wired to the given
 // discovery and resource backends.
 func NewResourceUseCase(discovery DiscoveryClient, resource ResourceRepo) *ResourceUseCase {
 	return &ResourceUseCase{
-		discovery:    discovery,
-		resource:     resource,
-		schemaCache:  make(map[string]*schemaCacheEntry),
-		versionCache: make(map[string]*versionCacheEntry),
+		discovery: discovery,
+		resource:  resource,
+		cache:     newDiscoveryCache(discovery, discoveryCacheTTL),
 	}
 }
 
@@ -175,49 +151,12 @@ func (uc *ResourceUseCase) ServerResources(ctx context.Context, cluster string) 
 }
 
 // ResolveSchema fetches the OpenAPI schema for the given GVK. Results
-// are cached for schemaCacheTTL and concurrent requests for the same
-// key are deduplicated via singleflight.
+// are cached and concurrent requests for the same key are deduplicated.
 func (uc *ResourceUseCase) ResolveSchema(
 	ctx context.Context,
 	cluster, group, version, kind string,
 ) (*spec.Schema, error) {
-	key := uc.schemaCacheKey(cluster, group, version, kind)
-
-	uc.mu.RLock()
-	entry, ok := uc.schemaCache[key]
-	uc.mu.RUnlock()
-
-	if ok && time.Now().Before(entry.expiresAt) {
-		return entry.schema, nil
-	}
-
-	v, err, _ := uc.schemaFlights.Do(key, func() (any, error) {
-		// Use a non-cancellable context with its own timeout so that
-		// a single caller's cancellation does not fail all waiters
-		// sharing this singleflight key.
-		fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
-		defer cancel()
-
-		resolved, err := uc.discovery.ResolveSchema(fetchCtx, cluster, group, version, kind)
-		if err != nil {
-			return nil, err
-		}
-
-		uc.mu.Lock()
-		uc.evictExpired()
-		uc.schemaCache[key] = &schemaCacheEntry{
-			schema:    resolved,
-			expiresAt: time.Now().Add(schemaCacheTTL),
-		}
-		uc.mu.Unlock()
-
-		return resolved, nil
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	return v.(*spec.Schema), nil
+	return uc.cache.ResolveSchema(ctx, cluster, group, version, kind)
 }
 
 // ListResources validates the GVR, fetches a paged resource list, and
@@ -289,8 +228,8 @@ func (uc *ResourceUseCase) DescribeResource(
 	return obj, events, nil
 }
 
-// CreateResource validates the GVR, decodes the YAML manifest, and
-// creates the resource on the target cluster.
+// CreateResource validates the GVR and creates the resource on the
+// target cluster from the given YAML manifest.
 func (uc *ResourceUseCase) CreateResource(
 	ctx context.Context,
 	cluster, group, version, resource, namespace string,
@@ -301,16 +240,11 @@ func (uc *ResourceUseCase) CreateResource(
 		return nil, err
 	}
 
-	obj, err := uc.fromYAML(manifest)
-	if err != nil {
-		return nil, err
-	}
-
-	return uc.resource.Create(ctx, cluster, gvr, namespace, obj)
+	return uc.resource.Create(ctx, cluster, gvr, namespace, manifest)
 }
 
-// ApplyResource validates the GVR, decodes the YAML manifest, and
-// performs a server-side apply on the target cluster.
+// ApplyResource validates the GVR and performs a server-side apply on
+// the target cluster from the given YAML manifest.
 func (uc *ResourceUseCase) ApplyResource(
 	ctx context.Context,
 	cluster, group, version, resource, namespace, name string,
@@ -322,17 +256,7 @@ func (uc *ResourceUseCase) ApplyResource(
 		return nil, err
 	}
 
-	obj, err := uc.fromYAML(manifest)
-	if err != nil {
-		return nil, err
-	}
-
-	data, err := obj.MarshalJSON()
-	if err != nil {
-		return nil, err
-	}
-
-	return uc.resource.Apply(ctx, cluster, gvr, namespace, name, data, opts)
+	return uc.resource.Apply(ctx, cluster, gvr, namespace, name, manifest, opts)
 }
 
 // DeleteResource validates the GVR and deletes the named resource.
@@ -362,36 +286,18 @@ func (uc *ResourceUseCase) WatchResource(
 		return nil, err
 	}
 
-	watchListFeature, err := uc.watchListFeature(ctx, cluster)
+	watchList, err := uc.discovery.SupportsWatchList(ctx, cluster)
 	if err != nil {
 		return nil, err
 	}
 
-	opts.SendInitialEvents = watchListFeature
+	opts.SendInitialEvents = watchList
 	return uc.resource.Watch(ctx, cluster, gvr, namespace, opts)
 }
 
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
-
-// schemaCacheKey builds a cache key from the cluster/group/version/kind tuple.
-func (uc *ResourceUseCase) schemaCacheKey(cluster, group, version, kind string) string {
-	return strings.Join([]string{cluster, group, version, kind}, "/")
-}
-
-// fromYAML decodes a YAML manifest into an Unstructured object.
-// Returns a BadRequest API error if the manifest is invalid.
-func (uc *ResourceUseCase) fromYAML(manifest []byte) (*unstructured.Unstructured, error) {
-	dec := yaml.NewDecodingSerializer(unstructured.UnstructuredJSONScheme)
-	obj := &unstructured.Unstructured{}
-
-	if _, _, err := dec.Decode(manifest, nil, obj); err != nil {
-		return nil, &ErrInvalidInput{Field: "manifest", Message: fmt.Sprintf("invalid YAML: %s", err)}
-	}
-
-	return obj, nil
-}
 
 // cleanObject strips noisy metadata that clutters list output:
 //   - metadata.managedFields (server-side apply bookkeeping)
@@ -413,78 +319,3 @@ func cleanObject(obj *unstructured.Unstructured) {
 	}
 }
 
-// watchListFeature reports whether the target cluster supports the
-// WatchList streaming feature (beta, default-on since Kubernetes 1.34).
-// The server version is cached per cluster to avoid an extra RPC on
-// every Watch call.
-// See https://kubernetes.io/docs/reference/using-api/api-concepts/#streaming-lists
-func (uc *ResourceUseCase) watchListFeature(ctx context.Context, cluster string) (bool, error) {
-	info, err := uc.serverVersion(ctx, cluster)
-	if err != nil {
-		return false, err
-	}
-
-	kubeVersion, err := semver.NewVersion(info.String())
-	if err != nil {
-		return false, err
-	}
-
-	return kubeVersion.GreaterThanEqual(minWatchListVersion), nil
-}
-
-// serverVersion returns the cached Kubernetes version for the given
-// cluster. Results are cached for schemaCacheTTL and concurrent
-// requests are deduplicated via singleflight.
-func (uc *ResourceUseCase) serverVersion(ctx context.Context, cluster string) (*version.Info, error) {
-	uc.mu.RLock()
-	entry, ok := uc.versionCache[cluster]
-	uc.mu.RUnlock()
-
-	if ok && time.Now().Before(entry.expiresAt) {
-		return entry.version, nil
-	}
-
-	v, err, _ := uc.versionFlights.Do(cluster, func() (any, error) {
-		// Use a non-cancellable context with its own timeout so that
-		// a single caller's cancellation does not fail all waiters
-		// sharing this singleflight key.
-		fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
-		defer cancel()
-
-		info, err := uc.discovery.ServerVersion(fetchCtx, cluster)
-		if err != nil {
-			return nil, err
-		}
-
-		uc.mu.Lock()
-		uc.evictExpired()
-		uc.versionCache[cluster] = &versionCacheEntry{
-			version:   info,
-			expiresAt: time.Now().Add(schemaCacheTTL),
-		}
-		uc.mu.Unlock()
-
-		return info, nil
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	return v.(*version.Info), nil
-}
-
-// evictExpired removes expired entries from the schema and version
-// caches. Must be called with mu held for writing.
-func (uc *ResourceUseCase) evictExpired() {
-	now := time.Now()
-	for key, entry := range uc.schemaCache {
-		if now.After(entry.expiresAt) {
-			delete(uc.schemaCache, key)
-		}
-	}
-	for key, entry := range uc.versionCache {
-		if now.After(entry.expiresAt) {
-			delete(uc.versionCache, key)
-		}
-	}
-}

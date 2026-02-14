@@ -14,7 +14,6 @@ import (
 	"sync"
 	"time"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/rest"
 
 	"github.com/otterscale/otterscale-agent/internal/core"
@@ -61,15 +60,18 @@ func New(tunnel core.TunnelProvider) *Kubernetes {
 func (k *Kubernetes) impersonationConfig(ctx context.Context, cluster string) (*rest.Config, error) {
 	userInfo, ok := core.UserInfoFromContext(ctx)
 	if !ok {
-		return nil, apierrors.NewUnauthorized("user info not found in context")
+		return nil, &core.DomainError{
+			Code:    core.ErrorCodeUnauthenticated,
+			Message: "user info not found in context",
+		}
 	}
 
-	address, err := k.tunnel.ResolveAddress(cluster)
+	address, err := k.tunnel.ResolveAddress(ctx, cluster)
 	if err != nil {
 		// Cluster is no longer registered; evict stale cached
 		// clients and their TCP connections.
 		k.evictClients(cluster)
-		return nil, apierrors.NewServiceUnavailable(err.Error())
+		return nil, err // ResolveAddress already returns *core.ErrClusterNotFound
 	}
 
 	rt, err := k.roundTripper(cluster, address)
@@ -97,15 +99,18 @@ func (k *Kubernetes) impersonationConfig(ctx context.Context, cluster string) (*
 func (k *Kubernetes) spdyConfig(ctx context.Context, cluster string) (*rest.Config, error) {
 	userInfo, ok := core.UserInfoFromContext(ctx)
 	if !ok {
-		return nil, apierrors.NewUnauthorized("user info not found in context")
+		return nil, &core.DomainError{
+			Code:    core.ErrorCodeUnauthenticated,
+			Message: "user info not found in context",
+		}
 	}
 
-	address, err := k.tunnel.ResolveAddress(cluster)
+	address, err := k.tunnel.ResolveAddress(ctx, cluster)
 	if err != nil {
 		// Cluster is no longer registered; evict stale cached
 		// clients and their TCP connections.
 		k.evictClients(cluster)
-		return nil, apierrors.NewServiceUnavailable(err.Error())
+		return nil, err // ResolveAddress already returns *core.ErrClusterNotFound
 	}
 
 	return &rest.Config{
@@ -144,7 +149,11 @@ func (k *Kubernetes) roundTripper(cluster, address string) (http.RoundTripper, e
 	cfg := &rest.Config{Host: address}
 	rt, err := rest.TransportFor(cfg)
 	if err != nil {
-		return nil, apierrors.NewInternalError(err)
+		return nil, &core.DomainError{
+			Code:    core.ErrorCodeInternal,
+			Message: "create HTTP transport",
+			Cause:   err,
+		}
 	}
 
 	k.transports[cluster] = &clusterTransport{

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/Masterminds/semver/v3"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -15,6 +16,10 @@ import (
 
 	"github.com/otterscale/otterscale-agent/internal/core"
 )
+
+// minWatchListVersion is the minimum Kubernetes version that supports
+// the WatchList streaming feature (beta, default-on since 1.34).
+var minWatchListVersion = semver.MustParse("v1.34.0")
 
 // discoveryClient implements core.DiscoveryClient by delegating to the
 // Kubernetes discovery API of the target cluster, accessed through the
@@ -50,7 +55,7 @@ func (d *discoveryClient) LookupResource(ctx context.Context, cluster, group, ve
 
 	resources, err := client.ServerResourcesForGroupVersion(gvr.GroupVersion().String())
 	if err != nil {
-		return schema.GroupVersionResource{}, err
+		return schema.GroupVersionResource{}, wrapK8sError(err)
 	}
 
 	for i := range resources.APIResources {
@@ -58,7 +63,7 @@ func (d *discoveryClient) LookupResource(ctx context.Context, cluster, group, ve
 			return gvr, nil
 		}
 	}
-	return schema.GroupVersionResource{}, apierrors.NewBadRequest(fmt.Sprintf("unable to recognize resource %s", gvr))
+	return schema.GroupVersionResource{}, wrapK8sError(apierrors.NewBadRequest(fmt.Sprintf("unable to recognize resource %s", gvr)))
 }
 
 // ServerResources returns the full list of API resources available on
@@ -70,7 +75,7 @@ func (d *discoveryClient) ServerResources(ctx context.Context, cluster string) (
 	}
 
 	_, resources, err := client.ServerGroupsAndResources()
-	return resources, err
+	return resources, wrapK8sError(err)
 }
 
 // ResolveSchema fetches the OpenAPI schema for the given GVK from the
@@ -89,7 +94,8 @@ func (d *discoveryClient) ResolveSchema(ctx context.Context, cluster, group, ver
 		Version: version,
 		Kind:    kind,
 	}
-	return schemaResolver.ResolveSchema(gvk)
+	resolved, err := schemaResolver.ResolveSchema(gvk)
+	return resolved, wrapK8sError(err)
 }
 
 // ServerVersion returns the Kubernetes version of the target cluster.
@@ -98,7 +104,25 @@ func (d *discoveryClient) ServerVersion(ctx context.Context, cluster string) (*v
 	if err != nil {
 		return nil, err
 	}
-	return client.ServerVersion()
+	info, err := client.ServerVersion()
+	return info, wrapK8sError(err)
+}
+
+// SupportsWatchList reports whether the target cluster supports the
+// WatchList streaming feature (Kubernetes >= 1.34).
+// See https://kubernetes.io/docs/reference/using-api/api-concepts/#streaming-lists
+func (d *discoveryClient) SupportsWatchList(ctx context.Context, cluster string) (bool, error) {
+	info, err := d.ServerVersion(ctx, cluster)
+	if err != nil {
+		return false, err
+	}
+
+	kubeVersion, err := semver.NewVersion(info.String())
+	if err != nil {
+		return false, err
+	}
+
+	return kubeVersion.GreaterThanEqual(minWatchListVersion), nil
 }
 
 // client returns a discovery client for the given cluster with
@@ -113,5 +137,9 @@ func (d *discoveryClient) client(ctx context.Context, cluster string) (*discover
 
 	// Build a discovery client that reuses the cached transport but
 	// applies per-request impersonation via a WrapTransport layer.
-	return discovery.NewDiscoveryClientForConfig(rest.CopyConfig(config))
+	dc, err := discovery.NewDiscoveryClientForConfig(rest.CopyConfig(config))
+	if err != nil {
+		return nil, wrapK8sError(err)
+	}
+	return dc, nil
 }

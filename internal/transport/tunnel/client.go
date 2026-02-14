@@ -223,23 +223,24 @@ func (c *Client) dial(ctx context.Context) (*chclient.Client, error) {
 
 	c.log.Info("registered", "endpoint", result.Endpoint)
 
-	// Write mTLS credentials to a temp directory. Clean up old
-	// ones first (from a previous registration attempt).
-	c.mu.Lock()
-	if c.certDir != "" {
-		if err := os.RemoveAll(c.certDir); err != nil {
-			c.log.Warn("failed to remove old cert dir", "error", err)
-		}
-	}
-	c.mu.Unlock()
-
+	// Write mTLS credentials to a temp directory.
 	dir, err := os.MkdirTemp("", "otterscale-tls-*")
 	if err != nil {
 		return nil, fmt.Errorf("create cert dir: %w", err)
 	}
+
+	// Atomically swap the cert directory under a single lock to
+	// avoid a TOCTOU race with Stop().
 	c.mu.Lock()
+	oldDir := c.certDir
 	c.certDir = dir
 	c.mu.Unlock()
+
+	if oldDir != "" {
+		if err := os.RemoveAll(oldDir); err != nil {
+			c.log.Warn("failed to remove old cert dir", "error", err)
+		}
+	}
 
 	caFile := filepath.Join(dir, "ca.pem")
 	certFile := filepath.Join(dir, "cert.pem")

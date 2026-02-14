@@ -102,7 +102,7 @@ func (s *Service) ListClusters() map[string]core.Cluster {
 // If the cluster was previously registered, the old host allocation
 // is released first so that re-registration always moves the cluster
 // to a fresh address.
-func (s *Service) RegisterCluster(cluster, agentID, agentVersion string, csrPEM []byte) (string, []byte, error) {
+func (s *Service) RegisterCluster(_ context.Context, cluster, agentID, agentVersion string, csrPEM []byte) (string, []byte, error) {
 	// Sign the agent's CSR with the internal CA.
 	certPEM, err := s.ca.SignCSR(csrPEM)
 	if err != nil {
@@ -182,7 +182,7 @@ func (s *Service) DeregisterCluster(cluster string) {
 
 // ResolveAddress returns the HTTP base URL for the given cluster's
 // tunnel endpoint. Returns an error if the cluster is not registered.
-func (s *Service) ResolveAddress(cluster string) (string, error) {
+func (s *Service) ResolveAddress(_ context.Context, cluster string) (string, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 

@@ -64,6 +64,20 @@ type ExecOptions struct {
 	SizeQueue TerminalSizer
 }
 
+// StartExecParams collects the parameters for starting an interactive
+// exec session. This avoids a long parameter list on
+// RuntimeUseCase.StartExec.
+type StartExecParams struct {
+	Cluster   string
+	Namespace string
+	Name      string
+	Container string
+	Command   []string
+	TTY       bool
+	Rows      uint16
+	Cols      uint16
+}
+
 // PortForwardOptions holds parameters for a port-forward session.
 type PortForwardOptions struct {
 	Port   int32
@@ -104,11 +118,11 @@ func (uc *RuntimeUseCase) StartPodLogs(ctx context.Context, cluster, namespace, 
 // StartExec creates an exec session, starts the exec in a background
 // goroutine, and returns the session together with stdout and stderr
 // readers that the caller can stream from.
-func (uc *RuntimeUseCase) StartExec(ctx context.Context, cluster, namespace, name string, container string, command []string, tty bool, rows, cols uint16) (*ExecSession, io.ReadCloser, io.ReadCloser, error) {
-	if name == "" {
+func (uc *RuntimeUseCase) StartExec(ctx context.Context, params StartExecParams) (*ExecSession, io.ReadCloser, io.ReadCloser, error) {
+	if params.Name == "" {
 		return nil, nil, nil, &ErrInvalidInput{Field: "name", Message: "pod name is required"}
 	}
-	if len(command) == 0 {
+	if len(params.Command) == 0 {
 		return nil, nil, nil, &ErrInvalidInput{Field: "command", Message: "command is required"}
 	}
 
@@ -118,8 +132,8 @@ func (uc *RuntimeUseCase) StartExec(ctx context.Context, cluster, namespace, nam
 	sizeQueue := NewTerminalSizeQueue()
 
 	// Send initial terminal size.
-	if rows > 0 && cols > 0 {
-		sizeQueue.Set(cols, rows)
+	if params.Rows > 0 && params.Cols > 0 {
+		sizeQueue.Set(params.Cols, params.Rows)
 	}
 
 	ctx, cancel := context.WithCancel(ctx)
@@ -140,14 +154,14 @@ func (uc *RuntimeUseCase) StartExec(ctx context.Context, cluster, namespace, nam
 		defer sizeQueue.Close()
 
 		var stderr io.Writer
-		if !tty {
+		if !params.TTY {
 			stderr = stderrW
 		}
 
-		errCh <- uc.runtime.Exec(ctx, cluster, namespace, name, ExecOptions{
-			Container: container,
-			Command:   command,
-			TTY:       tty,
+		errCh <- uc.runtime.Exec(ctx, params.Cluster, params.Namespace, params.Name, ExecOptions{
+			Container: params.Container,
+			Command:   params.Command,
+			TTY:       params.TTY,
 			Stdin:     stdinR,
 			Stdout:    stdoutW,
 			Stderr:    stderr,
