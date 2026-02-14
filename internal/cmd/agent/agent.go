@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"time"
 
+	"k8s.io/client-go/rest"
+
 	"github.com/otterscale/otterscale-agent/internal/bootstrap"
 	"github.com/otterscale/otterscale-agent/internal/core"
 	"github.com/otterscale/otterscale-agent/internal/pki"
@@ -28,6 +30,7 @@ type Config struct {
 // Agent binds a local HTTP reverse-proxy to a dynamically allocated
 // port and exposes it to the control-plane via a chisel tunnel.
 type Agent struct {
+	cfg          *rest.Config
 	handler      *Handler
 	tunnel       core.TunnelConsumer
 	version      core.Version
@@ -37,8 +40,8 @@ type Agent struct {
 // NewAgent returns an Agent wired to the given handler, tunnel
 // consumer, and bootstrapper. version is injected via DI and used for
 // version-mismatch detection during registration.
-func NewAgent(handler *Handler, tunnel core.TunnelConsumer, version core.Version, bootstrapper *bootstrap.Bootstrapper) *Agent {
-	return &Agent{handler: handler, tunnel: tunnel, version: version, bootstrapper: bootstrapper}
+func NewAgent(cfg *rest.Config, handler *Handler, tunnel core.TunnelConsumer, version core.Version, bootstrapper *bootstrap.Bootstrapper) *Agent {
+	return &Agent{cfg: cfg, handler: handler, tunnel: tunnel, version: version, bootstrapper: bootstrapper}
 }
 
 // Run starts the agent. When bootstrap is enabled, it first applies
@@ -90,7 +93,7 @@ func (a *Agent) Run(ctx context.Context, cfg Config) error {
 // version diverges from the agent version and, if so, triggers a
 // self-update by patching its own Deployment image.
 func (a *Agent) register() tunnel.RegisterFunc {
-	up := newUpdater()
+	up := newUpdater(a.cfg)
 
 	return func(ctx context.Context, serverURL, cluster string) (*tunnel.RegisterResult, error) {
 		reg, err := a.tunnel.Register(ctx, serverURL, cluster)

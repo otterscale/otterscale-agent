@@ -140,6 +140,7 @@ func provideCA(conf *config.Config) (*pki.CA, error) {
 func provideInClusterConfig() (*rest.Config, error) {
 	cfg, err := rest.InClusterConfig()
 	if err != nil {
+		slog.Warn("in-cluster config not available, falling back to kubeconfig", "error", err)
 		return clientcmd.BuildConfigFromFlags("", clientcmd.RecommendedHomeFile)
 	}
 	return cfg, nil

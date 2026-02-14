@@ -1,6 +1,7 @@
 package server
 
 import (
+	"log/slog"
 	"net/http"
 
 	"connectrpc.com/connect"
@@ -97,7 +98,9 @@ func (h *Handler) handleRawManifest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/yaml; charset=utf-8")
-	w.Write([]byte(manifest))
+	if _, err := w.Write([]byte(manifest)); err != nil {
+		slog.Warn("failed to write manifest response", "error", err)
+	}
 }
 
 // registerOpsHandlers sets up gRPC reflection, health checks, and

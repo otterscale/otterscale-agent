@@ -4,9 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
-	"log/slog"
 	"sync"
-	"time"
 
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -168,7 +166,12 @@ func (s *RuntimeService) ExecuteTTY(ctx context.Context, req *pb.ExecuteTTYReque
 		close(ch)
 	}()
 
-	// Stream chunks to the client until the exec session ends.
+	// Stream chunks to the client until all output is consumed.
+	// The channel is closed by the readerWg goroutine once both
+	// stdout and stderr readers exit (triggered by pipe closure
+	// when the exec session ends or CleanupExec runs). This
+	// guarantees all buffered data is delivered without relying on
+	// a time-based heuristic.
 	for {
 		select {
 		case <-ctx.Done():
@@ -188,14 +191,6 @@ func (s *RuntimeService) ExecuteTTY(ctx context.Context, req *pb.ExecuteTTYReque
 			if err := stream.Send(msg); err != nil {
 				return err
 			}
-
-		case execErr := <-sess.Done:
-			// Drain remaining output before closing.
-			s.drainExecChannel(ch, stream)
-			if execErr != nil {
-				slog.Debug("exec session ended with error", "session_id", sess.ID, "error", execErr)
-			}
-			return nil
 		}
 	}
 }
@@ -204,32 +199,6 @@ func (s *RuntimeService) ExecuteTTY(ctx context.Context, req *pb.ExecuteTTYReque
 type execChunk struct {
 	stdout []byte
 	stderr []byte
-}
-
-// drainExecChannel sends any remaining buffered chunks to the client.
-func (s *RuntimeService) drainExecChannel(ch <-chan execChunk, stream *connect.ServerStream[pb.ExecuteTTYResponse]) {
-	// Give writers a moment to flush.
-	timer := time.NewTimer(100 * time.Millisecond)
-	defer timer.Stop()
-
-	for {
-		select {
-		case c, ok := <-ch:
-			if !ok {
-				return
-			}
-			msg := &pb.ExecuteTTYResponse{}
-			if len(c.stdout) > 0 {
-				msg.SetStdout(c.stdout)
-			}
-			if len(c.stderr) > 0 {
-				msg.SetStderr(c.stderr)
-			}
-			_ = stream.Send(msg)
-		case <-timer.C:
-			return
-		}
-	}
 }
 
 // WriteTTY sends stdin data to an active exec session.

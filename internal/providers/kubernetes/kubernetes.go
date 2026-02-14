@@ -63,6 +63,9 @@ func (k *Kubernetes) impersonationConfig(ctx context.Context, cluster string) (*
 
 	address, err := k.tunnel.ResolveAddress(cluster)
 	if err != nil {
+		// Cluster is no longer registered; evict stale cached
+		// clients and their TCP connections.
+		k.evictClients(cluster)
 		return nil, apierrors.NewServiceUnavailable(err.Error())
 	}
 
@@ -95,6 +98,9 @@ func (k *Kubernetes) spdyConfig(ctx context.Context, cluster string) (*rest.Conf
 
 	address, err := k.tunnel.ResolveAddress(cluster)
 	if err != nil {
+		// Cluster is no longer registered; evict stale cached
+		// clients and their TCP connections.
+		k.evictClients(cluster)
 		return nil, apierrors.NewServiceUnavailable(err.Error())
 	}
 
@@ -173,6 +179,19 @@ func (k *Kubernetes) roundTripper(cluster, address string) (http.RoundTripper, e
 		return nil, err
 	}
 	return clients.rt, nil
+}
+
+// evictClients removes the cached clients for the given cluster and
+// closes idle TCP connections on the old transport. This is called
+// when a cluster is no longer registered (e.g. after deregistration)
+// to prevent connection and memory leaks.
+func (k *Kubernetes) evictClients(cluster string) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	if old, ok := k.clients[cluster]; ok {
+		closeTransport(old.rt)
+		delete(k.clients, cluster)
+	}
 }
 
 // closeTransport closes idle connections on the transport if it

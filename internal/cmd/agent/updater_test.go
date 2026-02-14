@@ -2,11 +2,14 @@ package agent
 
 import (
 	"context"
+	"strings"
 	"testing"
+
+	"k8s.io/client-go/rest"
 )
 
 func TestPatch_InvalidVersion(t *testing.T) {
-	u := newUpdater()
+	u := newUpdater(&rest.Config{})
 
 	tests := []struct {
 		name    string
@@ -34,7 +37,7 @@ func TestPatch_InvalidVersion(t *testing.T) {
 func TestPatch_ValidVersion(t *testing.T) {
 	// These versions should pass the semver validation but fail
 	// later at the Kubernetes client step (no in-cluster config).
-	u := newUpdater()
+	u := newUpdater(&rest.Config{})
 
 	tests := []struct {
 		name    string
@@ -55,7 +58,7 @@ func TestPatch_ValidVersion(t *testing.T) {
 			}
 			// The error should be about creating the kube client,
 			// NOT about invalid version.
-			if containsSubstring(err.Error(), "invalid server version") {
+			if strings.Contains(err.Error(), "invalid server version") {
 				t.Errorf("version %q should pass semver validation, got: %v", tt.version, err)
 			}
 		})
@@ -78,15 +81,3 @@ func TestDetectNamespace_FallbackToDefault(t *testing.T) {
 	}
 }
 
-func containsSubstring(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsSubstringImpl(s, substr))
-}
-
-func containsSubstringImpl(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
-}

@@ -458,6 +458,7 @@ func (uc *ResourceUseCase) serverVersion(ctx context.Context, cluster string) (*
 		}
 
 		uc.mu.Lock()
+		uc.evictExpired()
 		uc.versionCache[cluster] = &versionCacheEntry{
 			version:   info,
 			expiresAt: time.Now().Add(schemaCacheTTL),

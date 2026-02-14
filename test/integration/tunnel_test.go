@@ -16,7 +16,10 @@ import (
 func TestFleetRegisterClusterUsesSingleSharedTunnelPort(t *testing.T) {
 	tunnel := newTestTunnel(t)
 	initTunnelServer(t, tunnel)
-	fleet := core.NewFleetUseCase(tunnel, "test", core.AgentManifestConfig{})
+	fleet, err := core.NewFleetUseCase(tunnel, "test", testManifestConfig())
+	if err != nil {
+		t.Fatalf("create fleet use case: %v", err)
+	}
 
 	csrA := generateCSR(t, "agent-a")
 	csrB := generateCSR(t, "agent-b")
@@ -61,12 +64,15 @@ func TestFleetRegisterClusterUsesSingleSharedTunnelPort(t *testing.T) {
 func TestFleetRegisterClusterLatestAgentWinsForSameCluster(t *testing.T) {
 	tunnel := newTestTunnel(t)
 	initTunnelServer(t, tunnel)
-	fleet := core.NewFleetUseCase(tunnel, "test", core.AgentManifestConfig{})
+	fleet, err := core.NewFleetUseCase(tunnel, "test", testManifestConfig())
+	if err != nil {
+		t.Fatalf("create fleet use case: %v", err)
+	}
 
 	csr1 := generateCSR(t, "agent-r-1")
 	csr2 := generateCSR(t, "agent-r-2")
 
-	_, err := fleet.RegisterCluster("cluster-r", "agent-r-1", "test", csr1)
+	_, err = fleet.RegisterCluster("cluster-r", "agent-r-1", "test", csr1)
 	if err != nil {
 		t.Fatalf("register agent-r-1: %v", err)
 	}
@@ -95,7 +101,10 @@ func TestFleetRegisterClusterLatestAgentWinsForSameCluster(t *testing.T) {
 func TestFleetRegisterClusterReregisterAndReplaceAcrossAgents(t *testing.T) {
 	tunnel := newTestTunnel(t)
 	initTunnelServer(t, tunnel)
-	fleet := core.NewFleetUseCase(tunnel, "test", core.AgentManifestConfig{})
+	fleet, err := core.NewFleetUseCase(tunnel, "test", testManifestConfig())
+	if err != nil {
+		t.Fatalf("create fleet use case: %v", err)
+	}
 
 	csrA := generateCSR(t, "agent-a")
 	csrB := generateCSR(t, "agent-b")
@@ -173,6 +182,16 @@ func initTunnelServer(t *testing.T, tunnel *chisel.Service) {
 	t.Cleanup(func() {
 		_ = srv.Stop(context.Background())
 	})
+}
+
+// testManifestConfig returns an AgentManifestConfig with dummy values
+// suitable for integration tests.
+func testManifestConfig() core.AgentManifestConfig {
+	return core.AgentManifestConfig{
+		ServerURL: "https://test.example.com",
+		TunnelURL: "https://tunnel.example.com:8300",
+		HMACKey:   []byte("test-hmac-key-for-integration-tt"),
+	}
 }
 
 // generateCSR creates a fresh ECDSA key pair and PEM-encoded CSR for

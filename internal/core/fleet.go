@@ -17,6 +17,15 @@ import (
 	"time"
 )
 
+// maxClusterNameLength is the maximum allowed length for a cluster
+// name. This matches the Kubernetes label value length limit.
+const maxClusterNameLength = 63
+
+// reNonAlphaNum matches one or more consecutive non-alphanumeric
+// characters. Compiled once at package level to avoid recompiling on
+// every sanitizeK8sName call.
+var reNonAlphaNum = regexp.MustCompile(`[^a-z0-9]+`)
+
 // TunnelProvider is the server-side abstraction for managing reverse
 // tunnels. It allocates unique endpoints per cluster, signs agent
 // CSRs, and provisions tunnel users for each connecting agent.
@@ -111,13 +120,23 @@ type FleetUseCase struct {
 // TunnelProvider. version is the server binary version, included in
 // registration responses so agents can detect mismatches.
 // manifestCfg provides the external URLs embedded in generated agent
-// installation manifests.
-func NewFleetUseCase(tunnel TunnelProvider, version Version, manifestCfg AgentManifestConfig) *FleetUseCase {
+// installation manifests. It returns an error if any required
+// manifest configuration field is missing.
+func NewFleetUseCase(tunnel TunnelProvider, version Version, manifestCfg AgentManifestConfig) (*FleetUseCase, error) {
+	if manifestCfg.ServerURL == "" {
+		return nil, fmt.Errorf("manifest config: server URL is required")
+	}
+	if manifestCfg.TunnelURL == "" {
+		return nil, fmt.Errorf("manifest config: tunnel URL is required")
+	}
+	if len(manifestCfg.HMACKey) == 0 {
+		return nil, fmt.Errorf("manifest config: HMAC key is required")
+	}
 	return &FleetUseCase{
 		tunnel:      tunnel,
 		version:     version,
 		manifestCfg: manifestCfg,
-	}
+	}, nil
 }
 
 // ListClusters returns the names of all currently registered clusters.
@@ -125,10 +144,23 @@ func (uc *FleetUseCase) ListClusters() map[string]Cluster {
 	return uc.tunnel.ListClusters()
 }
 
-// RegisterCluster forwards the agent's CSR to the tunnel provider for
-// signing, and returns the signed certificate, CA certificate, tunnel
-// endpoint, and the server's version.
+// RegisterCluster validates the inputs, forwards the agent's CSR to
+// the tunnel provider for signing, and returns the signed certificate,
+// CA certificate, tunnel endpoint, and the server's version.
 func (uc *FleetUseCase) RegisterCluster(cluster, agentID, agentVersion string, csrPEM []byte) (Registration, error) {
+	if cluster == "" {
+		return Registration{}, fmt.Errorf("cluster name must not be empty")
+	}
+	if len(cluster) > maxClusterNameLength {
+		return Registration{}, fmt.Errorf("cluster name must not exceed %d characters", maxClusterNameLength)
+	}
+	if agentID == "" {
+		return Registration{}, fmt.Errorf("agent ID must not be empty")
+	}
+	if len(csrPEM) == 0 {
+		return Registration{}, fmt.Errorf("CSR must not be empty")
+	}
+
 	endpoint, certPEM, err := uc.tunnel.RegisterCluster(cluster, agentID, agentVersion, csrPEM)
 	if err != nil {
 		return Registration{}, err
@@ -265,15 +297,23 @@ type agentManifestData struct {
 // lower-cases the input, replaces non-alphanumeric characters with
 // hyphens, collapses consecutive hyphens, and trims leading/trailing
 // hyphens. The result is truncated to 63 characters (the Kubernetes
-// name length limit).
+// name length limit). If the sanitized result is empty (e.g. the
+// input consisted entirely of special characters), a deterministic
+// hash-based fallback is used.
 func sanitizeK8sName(s string) string {
+	original := s
 	s = strings.ToLower(s)
-	re := regexp.MustCompile(`[^a-z0-9]+`)
-	s = re.ReplaceAllString(s, "-")
+	s = reNonAlphaNum.ReplaceAllString(s, "-")
 	s = strings.Trim(s, "-")
 	if len(s) > 63 {
 		s = s[:63]
 		s = strings.TrimRight(s, "-")
+	}
+	if s == "" {
+		// Fallback: use a truncated SHA-256 hash of the original
+		// input to produce a deterministic, valid name.
+		h := sha256.Sum256([]byte(original))
+		s = fmt.Sprintf("u-%x", h[:8])
 	}
 	return s
 }

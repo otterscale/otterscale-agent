@@ -50,7 +50,10 @@ func wireServer(v core.Version, conf *config.Config) (*server.Server, func(), er
 	if err != nil {
 		return nil, nil, err
 	}
-	fleetUseCase := core.NewFleetUseCase(service, v, agentManifestConfig)
+	fleetUseCase, err := core.NewFleetUseCase(service, v, agentManifestConfig)
+	if err != nil {
+		return nil, nil, err
+	}
 	fleetService := app.NewFleetService(fleetUseCase)
 	kubernetesKubernetes := kubernetes.New(service)
 	discoveryClient := kubernetes.NewDiscoveryClient(kubernetesKubernetes)
@@ -70,12 +73,12 @@ func wireServer(v core.Version, conf *config.Config) (*server.Server, func(), er
 // registrar, and bootstrapper. The version parameter is provided by
 // the caller and flows through Wire to both FleetRegistrar and Agent.
 func wireAgent(v core.Version) (*agent.Agent, func(), error) {
-	handler := agent.NewHandler()
-	tunnelConsumer, err := otterscale.NewFleetRegistrar(v)
+	restConfig, err := provideInClusterConfig()
 	if err != nil {
 		return nil, nil, err
 	}
-	restConfig, err := provideInClusterConfig()
+	handler := agent.NewHandler(restConfig)
+	tunnelConsumer, err := otterscale.NewFleetRegistrar(v)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -83,7 +86,7 @@ func wireAgent(v core.Version) (*agent.Agent, func(), error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	agentAgent := agent.NewAgent(handler, tunnelConsumer, v, bootstrapper)
+	agentAgent := agent.NewAgent(restConfig, handler, tunnelConsumer, v, bootstrapper)
 	return agentAgent, func() {
 	}, nil
 }

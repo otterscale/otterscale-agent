@@ -121,11 +121,19 @@ func (s *Service) checkClusters(ctx context.Context, dialer net.Dialer, failCoun
 		)
 
 		if failCounts[cluster] >= healthFailThreshold {
-			s.log.Info("deregistering disconnected cluster",
-				"cluster", cluster,
-				"consecutive_failures", failCounts[cluster],
-			)
-			s.DeregisterCluster(cluster)
+			// Verify the host hasn't changed since the snapshot was
+			// taken. A concurrent re-registration would assign a new
+			// host; deregistering in that case would be incorrect.
+			s.mu.RLock()
+			current, exists := s.clusters[cluster]
+			s.mu.RUnlock()
+			if exists && current.Host == host {
+				s.log.Info("deregistering disconnected cluster",
+					"cluster", cluster,
+					"consecutive_failures", failCounts[cluster],
+				)
+				s.DeregisterCluster(cluster)
+			}
 			delete(failCounts, cluster)
 		}
 	}

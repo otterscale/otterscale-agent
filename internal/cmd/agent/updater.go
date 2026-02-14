@@ -14,7 +14,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
 )
 
 const (
@@ -38,14 +37,16 @@ const inClusterNamespacePath = "/var/run/secrets/kubernetes.io/serviceaccount/na
 type updater struct {
 	mu     sync.Mutex
 	client kubernetes.Interface // cached clientset
+	cfg    *rest.Config
 	log    *slog.Logger
 }
 
 // newUpdater returns an updater configured with the Deployment
 // coordinates. Values are read from environment variables with
 // sensible defaults.
-func newUpdater() *updater {
+func newUpdater(cfg *rest.Config) *updater {
 	return &updater{
+		cfg: cfg,
 		log: slog.Default().With("component", "updater"),
 	}
 }
@@ -153,15 +154,7 @@ func (u *updater) getOrCreateClient() (kubernetes.Interface, error) {
 		return u.client, nil
 	}
 
-	cfg, err := rest.InClusterConfig()
-	if err != nil {
-		cfg, err = clientcmd.BuildConfigFromFlags("", clientcmd.RecommendedHomeFile)
-		if err != nil {
-			return nil, fmt.Errorf("load kube config: %w", err)
-		}
-	}
-
-	client, err := kubernetes.NewForConfig(cfg)
+	client, err := kubernetes.NewForConfig(u.cfg)
 	if err != nil {
 		return nil, err
 	}

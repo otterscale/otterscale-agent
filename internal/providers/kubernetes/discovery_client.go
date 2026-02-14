@@ -101,7 +101,7 @@ func (d *discoveryClient) ServerVersion(ctx context.Context, cluster string) (*v
 	return client.ServerVersion()
 }
 
-// client returns a cached discovery client for the given cluster with
+// client returns a discovery client for the given cluster with
 // impersonation headers set for the calling user. The underlying HTTP
 // transport is shared across users; only the impersonation config
 // differs per request.
@@ -113,7 +113,5 @@ func (d *discoveryClient) client(ctx context.Context, cluster string) (*discover
 
 	// Build a discovery client that reuses the cached transport but
 	// applies per-request impersonation via a WrapTransport layer.
-	return discovery.NewDiscoveryClientForConfigOrDie(
-		rest.CopyConfig(config),
-	), nil
+	return discovery.NewDiscoveryClientForConfig(rest.CopyConfig(config))
 }

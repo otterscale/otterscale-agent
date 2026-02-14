@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"strings"
@@ -311,15 +312,20 @@ func newBackoff(base, max time.Duration) *backoff {
 	return &backoff{base: base, max: max, current: base}
 }
 
-// Next returns the current delay, then doubles it for the next call.
+// Next returns a jittered delay based on the current backoff interval,
+// then doubles the interval for the next call. Full jitter (uniform
+// random between 0 and current) prevents thundering-herd effects when
+// multiple agents reconnect simultaneously after a server restart.
 func (b *backoff) Next() time.Duration {
 	d := b.current
+	// Full jitter: uniform random in [0, current].
+	jittered := time.Duration(rand.Int64N(int64(d) + 1))
 	if next := b.current * 2; next > b.max {
 		b.current = b.max
 	} else {
 		b.current = next
 	}
-	return d
+	return jittered
 }
 
 // Reset sets the delay back to the base value.
