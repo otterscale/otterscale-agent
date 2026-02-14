@@ -53,18 +53,18 @@ func Serve(ctx context.Context, lis ...Listener) error {
 
 	// A single goroutine waits for the derived context to be
 	// cancelled (either parent ctx or a listener failure), then
-	// stops all listeners sequentially.
+	// stops all listeners sequentially. Each listener gets its own
+	// timeout so that a slow listener cannot starve subsequent ones.
 	eg.Go(func() error {
 		<-egCtx.Done()
 
-		stopCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
-		defer cancel()
-
 		var errs []error
 		for _, li := range lis {
+			stopCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 			if err := li.Stop(stopCtx); err != nil {
 				errs = append(errs, err)
 			}
+			cancel()
 		}
 		return errors.Join(errs...)
 	})

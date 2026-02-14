@@ -89,20 +89,6 @@ func (s *FleetService) GetAgentManifest(ctx context.Context, req *pb.GetAgentMan
 	return resp, nil
 }
 
-// VerifyManifestToken validates an HMAC-signed manifest token and
-// returns the embedded cluster name and user identity. Used by the
-// raw HTTP manifest endpoint.
-func (s *FleetService) VerifyManifestToken(ctx context.Context, token string) (cluster, userName string, err error) {
-	return s.fleet.VerifyManifestToken(ctx, token)
-}
-
-// RenderManifest generates the agent installation manifest for the
-// given cluster and user. Used by the raw HTTP manifest endpoint
-// after token verification.
-func (s *FleetService) RenderManifest(ctx context.Context, cluster, userName string) (string, error) {
-	return s.fleet.GenerateAgentManifest(ctx, cluster, userName)
-}
-
 // toProtoClusters converts a map of cluster names to Cluster domain
 // objects into a sorted slice of protobuf Cluster messages. Results
 // are sorted by name to ensure deterministic ordering.

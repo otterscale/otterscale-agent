@@ -174,6 +174,21 @@ func (s *SessionStore) DeleteExec(id string) {
 	delete(s.execSess, id)
 }
 
+// RemoveExec atomically retrieves and removes an exec session. It
+// returns nil if the session does not exist. This prevents the
+// double-close race between CleanupExec and ReapStaleSessions by
+// ensuring only one caller can claim ownership of a session.
+func (s *SessionStore) RemoveExec(id string) *ExecSession {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sess, ok := s.execSess[id]
+	if !ok {
+		return nil
+	}
+	delete(s.execSess, id)
+	return sess
+}
+
 // PutPortForward stores a port-forward session. It returns an error
 // if the maximum number of concurrent port-forward sessions has been
 // reached.
@@ -203,6 +218,21 @@ func (s *SessionStore) DeletePortForward(id string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.pfSess, id)
+}
+
+// RemovePortForward atomically retrieves and removes a port-forward
+// session. It returns nil if the session does not exist. This prevents
+// the double-close race between CleanupPortForward and
+// ReapStaleSessions by ensuring only one caller can claim ownership.
+func (s *SessionStore) RemovePortForward(id string) *PortForwardSession {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sess, ok := s.pfSess[id]
+	if !ok {
+		return nil
+	}
+	delete(s.pfSess, id)
+	return sess
 }
 
 // ReapStaleSessions scans all sessions and removes those whose Done

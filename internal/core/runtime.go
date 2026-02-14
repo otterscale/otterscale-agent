@@ -226,14 +226,16 @@ func (uc *RuntimeUseCase) ResizeExec(_ context.Context, sessionID string, rows, 
 }
 
 // CleanupExec stops an exec session and removes it from the store.
+// RemoveExec is used instead of separate Get+Delete to atomically
+// claim ownership, preventing a double-close race with
+// ReapStaleSessions.
 func (uc *RuntimeUseCase) CleanupExec(_ context.Context, sessionID string) {
-	sess, ok := uc.sessions.GetExec(sessionID)
-	if !ok {
+	sess := uc.sessions.RemoveExec(sessionID)
+	if sess == nil {
 		return
 	}
 	sess.Cancel()
 	sess.Stdin.Close()
-	uc.sessions.DeleteExec(sessionID)
 }
 
 // StartPortForward creates a port-forward session, starts the
@@ -312,20 +314,27 @@ func (uc *RuntimeUseCase) WritePortForward(ctx context.Context, sessionID string
 }
 
 // CleanupPortForward stops a port-forward session and removes it from
-// the store.
+// the store. RemovePortForward is used instead of separate Get+Delete
+// to atomically claim ownership, preventing a double-close race with
+// ReapStaleSessions.
 func (uc *RuntimeUseCase) CleanupPortForward(_ context.Context, sessionID string) {
-	sess, ok := uc.sessions.GetPortForward(sessionID)
-	if !ok {
+	sess := uc.sessions.RemovePortForward(sessionID)
+	if sess == nil {
 		return
 	}
 	sess.Cancel()
 	sess.Writer.Close()
-	uc.sessions.DeletePortForward(sessionID)
 }
 
-// Scale validates the GVR, reads the current scale, updates it to the
-// desired replicas, and returns the new replica count.
+// Scale validates the inputs, looks up the GVR, updates the desired
+// replica count, and returns the new value.
 func (uc *RuntimeUseCase) Scale(ctx context.Context, cluster, group, version, resource, namespace, name string, replicas int32) (int32, error) {
+	if name == "" {
+		return 0, &ErrInvalidInput{Field: "name", Message: "resource name is required"}
+	}
+	if replicas < 0 {
+		return 0, &ErrInvalidInput{Field: "replicas", Message: "must be non-negative"}
+	}
 	gvr, err := uc.discovery.LookupResource(ctx, cluster, group, version, resource)
 	if err != nil {
 		return 0, err
@@ -353,8 +362,12 @@ func (uc *RuntimeUseCase) StartSessionReaper(ctx context.Context, interval time.
 	}
 }
 
-// Restart validates the GVR and triggers a rolling restart.
+// Restart validates the inputs, looks up the GVR, and triggers a
+// rolling restart.
 func (uc *RuntimeUseCase) Restart(ctx context.Context, cluster, group, version, resource, namespace, name string) error {
+	if name == "" {
+		return &ErrInvalidInput{Field: "name", Message: "resource name is required"}
+	}
 	gvr, err := uc.discovery.LookupResource(ctx, cluster, group, version, resource)
 	if err != nil {
 		return err

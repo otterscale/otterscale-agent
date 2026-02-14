@@ -35,8 +35,12 @@ type manifestTokenClaims struct {
 // single responsibility, making it easier to swap token formats (e.g.
 // JWT, opaque) in the future without modifying the fleet orchestration
 // logic.
+//
+// The now function is injected to decouple from wall-clock time,
+// enabling deterministic tests without time.Sleep or reflect hacks.
 type ManifestTokenIssuer struct {
 	hmacKey []byte
+	now     func() time.Time
 }
 
 // NewManifestTokenIssuer returns a ManifestTokenIssuer backed by the
@@ -45,13 +49,13 @@ func NewManifestTokenIssuer(hmacKey []byte) (*ManifestTokenIssuer, error) {
 	if len(hmacKey) == 0 {
 		return nil, fmt.Errorf("manifest token issuer: HMAC key is required")
 	}
-	return &ManifestTokenIssuer{hmacKey: hmacKey}, nil
+	return &ManifestTokenIssuer{hmacKey: hmacKey, now: time.Now}, nil
 }
 
 // Issue creates a signed token containing the user identity, cluster
 // name, issued-at, and expiry timestamps.
 func (i *ManifestTokenIssuer) Issue(cluster, userName string) (string, error) {
-	now := time.Now()
+	now := i.now()
 	claims := manifestTokenClaims{
 		Sub:     userName,
 		Cluster: cluster,
@@ -115,7 +119,7 @@ func (i *ManifestTokenIssuer) verifyDetailed(token string) (cluster, userName st
 		return "", "", fmt.Errorf("parse token claims: %w", err)
 	}
 
-	now := time.Now().Unix()
+	now := i.now().Unix()
 
 	if now > claims.Exp {
 		return "", "", fmt.Errorf("token expired")

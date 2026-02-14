@@ -1,6 +1,4 @@
-// Package middleware provides HTTP middleware for the otterscale
-// server, including OIDC-based authentication.
-package middleware
+package http
 
 import (
 	"context"
@@ -13,10 +11,10 @@ import (
 	"github.com/otterscale/otterscale-agent/internal/core"
 )
 
-// keycloakClaims holds the custom claims extracted from a Keycloak
-// ID token. The "groups" claim contains the user's Keycloak group
-// memberships.
-type keycloakClaims struct {
+// oidcGroupClaims holds the custom claims extracted from an OIDC ID
+// token. The "groups" claim is a standard OIDC claim supported by
+// most providers (Keycloak, Dex, Auth0, etc.).
+type oidcGroupClaims struct {
 	Groups []string `json:"groups"`
 }
 
@@ -24,10 +22,10 @@ type keycloakClaims struct {
 // incoming Bearer tokens against the given OIDC issuer and client ID.
 //
 // On success, the authenticated user's subject and groups are stored
-// in the request context as core.UserInfo. Keycloak groups are
-// prefixed with "oidc:" to keep them separate from Kubernetes-native
-// groups and avoid unintended privilege escalation via name collisions.
-// The "system:authenticated" group is always included.
+// in the request context as core.UserInfo. OIDC groups are prefixed
+// with "oidc:" to keep them separate from Kubernetes-native groups and
+// avoid unintended privilege escalation via name collisions. The
+// "system:authenticated" group is always included.
 func NewOIDC(issuer, clientID string) (*authn.Middleware, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -52,7 +50,7 @@ func NewOIDC(issuer, clientID string) (*authn.Middleware, error) {
 			return nil, authn.Errorf("invalid token: %s", err)
 		}
 
-		var claims keycloakClaims
+		var claims oidcGroupClaims
 		if err := idToken.Claims(&claims); err != nil {
 			return nil, authn.Errorf("parse token claims: %s", err)
 		}

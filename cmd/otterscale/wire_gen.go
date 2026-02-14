@@ -68,8 +68,10 @@ func wireServer(v core.Version, conf *config.Config) (*server.Server, func(), er
 	sessionStore := core.NewSessionStore()
 	runtimeUseCase := core.NewRuntimeUseCase(discoveryClient, runtimeRepo, sessionStore)
 	runtimeService := handler.NewRuntimeService(runtimeUseCase)
-	serverHandler := server.NewHandler(fleetService, resourceService, runtimeService)
-	serverServer := server.NewServer(serverHandler, service, runtimeUseCase, discoveryCache)
+	manifestHandler := handler.NewManifestHandler(fleetUseCase)
+	serverHandler := server.NewHandler(fleetService, resourceService, runtimeService, manifestHandler)
+	backgroundListeners := server.ProvideBackgroundListeners(runtimeUseCase, discoveryCache)
+	serverServer := server.NewServer(serverHandler, service, backgroundListeners)
 	return serverServer, func() {
 	}, nil
 }

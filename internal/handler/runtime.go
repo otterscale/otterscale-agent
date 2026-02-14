@@ -3,7 +3,9 @@ package handler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"math"
 	"sync"
 
 	"connectrpc.com/connect"
@@ -97,6 +99,13 @@ func (s *RuntimeService) PodLog(ctx context.Context, req *pb.PodLogRequest, stre
 // contains the session_id that the client must use for WriteTTY
 // and ResizeTTY calls.
 func (s *RuntimeService) ExecuteTTY(ctx context.Context, req *pb.ExecuteTTYRequest, stream *connect.ServerStream[pb.ExecuteTTYResponse]) error {
+	rows := req.GetRows()
+	cols := req.GetCols()
+	if rows > math.MaxUint16 || cols > math.MaxUint16 {
+		return connect.NewError(connect.CodeInvalidArgument,
+			fmt.Errorf("terminal dimensions out of range (max %d)", math.MaxUint16))
+	}
+
 	sess, stdoutR, stderrR, err := s.runtime.StartExec(ctx, core.StartExecParams{
 		Cluster:   req.GetCluster(),
 		Namespace: req.GetNamespace(),
@@ -104,8 +113,8 @@ func (s *RuntimeService) ExecuteTTY(ctx context.Context, req *pb.ExecuteTTYReque
 		Container: req.GetContainer(),
 		Command:   req.GetCommand(),
 		TTY:       req.GetTty(),
-		Rows:      uint16(req.GetRows()),
-		Cols:      uint16(req.GetCols()),
+		Rows:      uint16(rows),
+		Cols:      uint16(cols),
 	})
 	if err != nil {
 		return domainErrorToConnectError(err)
@@ -210,7 +219,13 @@ func (s *RuntimeService) WriteTTY(ctx context.Context, req *pb.WriteTTYRequest) 
 
 // ResizeTTY updates the terminal dimensions of an active exec session.
 func (s *RuntimeService) ResizeTTY(ctx context.Context, req *pb.ResizeTTYRequest) (*emptypb.Empty, error) {
-	if err := s.runtime.ResizeExec(ctx, req.GetSessionId(), uint16(req.GetRows()), uint16(req.GetCols())); err != nil {
+	rows := req.GetRows()
+	cols := req.GetCols()
+	if rows > math.MaxUint16 || cols > math.MaxUint16 {
+		return nil, connect.NewError(connect.CodeInvalidArgument,
+			fmt.Errorf("terminal dimensions out of range (max %d)", math.MaxUint16))
+	}
+	if err := s.runtime.ResizeExec(ctx, req.GetSessionId(), uint16(rows), uint16(cols)); err != nil {
 		return nil, domainErrorToConnectError(err)
 	}
 	return &emptypb.Empty{}, nil

@@ -28,14 +28,17 @@ type Handler struct {
 	fleet    *handler.FleetService
 	resource *handler.ResourceService
 	runtime  *handler.RuntimeService
+	manifest *handler.ManifestHandler
 }
 
-// NewHandler returns a Handler for the given gRPC services.
-func NewHandler(fleet *handler.FleetService, resource *handler.ResourceService, runtime *handler.RuntimeService) *Handler {
+// NewHandler returns a Handler for the given gRPC services and the
+// raw HTTP manifest handler.
+func NewHandler(fleet *handler.FleetService, resource *handler.ResourceService, runtime *handler.RuntimeService, manifest *handler.ManifestHandler) *Handler {
 	return &Handler{
 		fleet:    fleet,
 		resource: resource,
 		runtime:  runtime,
+		manifest: manifest,
 	}
 }
 
@@ -85,14 +88,14 @@ func (h *Handler) Mount(mux *http.ServeMux) error {
 func (h *Handler) handleRawManifest(w http.ResponseWriter, r *http.Request) {
 	token := r.PathValue("token")
 
-	cluster, userName, err := h.fleet.VerifyManifestToken(r.Context(), token)
+	cluster, userName, err := h.manifest.VerifyManifestToken(r.Context(), token)
 	if err != nil {
 		slog.Debug("manifest token verification failed", "error", err)
 		http.Error(w, "invalid or expired token", http.StatusUnauthorized)
 		return
 	}
 
-	manifest, err := h.fleet.RenderManifest(r.Context(), cluster, userName)
+	manifest, err := h.manifest.RenderManifest(r.Context(), cluster, userName)
 	if err != nil {
 		slog.Debug("manifest render failed", "cluster", cluster, "user", userName, "error", err)
 		http.Error(w, "failed to render manifest", http.StatusInternalServerError)
