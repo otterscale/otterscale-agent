@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -15,7 +16,6 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/httpstream"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -283,7 +283,9 @@ func (r *runtimeRepo) PortForward(ctx context.Context, cluster, namespace, name 
 		n, _ := errorStream.Read(buf)
 		if n > 0 {
 			// Error from kubelet; close data stream to unblock copies.
-			_ = dataStream.Close()
+			if err := dataStream.Close(); err != nil {
+				slog.Warn("failed to close data stream after kubelet error", "error", err)
+			}
 		}
 	}()
 
@@ -348,6 +350,3 @@ func (r *runtimeRepo) dynamicClient(ctx context.Context, cluster string) (*dynam
 	}
 	return dynamic.NewForConfig(config)
 }
-
-// Ensure httpstream.Connection is assignable (compile-time check).
-var _ httpstream.Connection = (httpstream.Connection)(nil)

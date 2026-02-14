@@ -82,8 +82,9 @@ type PortForwardOptions struct {
 // buffered channel. Resize events are enqueued via Set and dequeued by
 // the remotecommand executor via Next.
 type TerminalSizeQueue struct {
-	mu sync.Mutex
-	ch chan remotecommand.TerminalSize
+	mu     sync.Mutex
+	ch     chan remotecommand.TerminalSize
+	closed bool
 }
 
 // NewTerminalSizeQueue returns a TerminalSizeQueue with a small buffer
@@ -104,10 +105,15 @@ func (q *TerminalSizeQueue) Next() *remotecommand.TerminalSize {
 
 // Set enqueues a resize event. If the queue is full, the oldest event
 // is dropped to make room. A mutex prevents concurrent callers from
-// racing on the drain-then-push sequence.
+// racing on the drain-then-push sequence. Calls after Close are
+// silently ignored to prevent a send-on-closed-channel panic.
 func (q *TerminalSizeQueue) Set(width, height uint16) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
+
+	if q.closed {
+		return
+	}
 
 	select {
 	case q.ch <- remotecommand.TerminalSize{Width: width, Height: height}:
@@ -119,8 +125,15 @@ func (q *TerminalSizeQueue) Set(width, height uint16) {
 }
 
 // Close closes the underlying channel, causing Next to return nil.
+// It is safe to call Close multiple times.
 func (q *TerminalSizeQueue) Close() {
-	close(q.ch)
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	if !q.closed {
+		q.closed = true
+		close(q.ch)
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -229,7 +242,9 @@ func (s *SessionStore) ReapStaleSessions() int {
 		select {
 		case <-sess.Done:
 			sess.Cancel()
-			_ = sess.Stdin.Close()
+			if err := sess.Stdin.Close(); err != nil {
+				slog.Warn("failed to close exec stdin", "session", id, "error", err)
+			}
 			delete(s.execSess, id)
 			reaped++
 		default:
@@ -240,7 +255,9 @@ func (s *SessionStore) ReapStaleSessions() int {
 		select {
 		case <-sess.Done:
 			sess.Cancel()
-			_ = sess.Writer.Close()
+			if err := sess.Writer.Close(); err != nil {
+				slog.Warn("failed to close port-forward writer", "session", id, "error", err)
+			}
 			delete(s.pfSess, id)
 			reaped++
 		default:

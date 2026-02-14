@@ -15,6 +15,8 @@ import (
 	"strings"
 	"text/template"
 	"time"
+
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 )
 
 // maxClusterNameLength is the maximum allowed length for a cluster
@@ -25,6 +27,12 @@ const maxClusterNameLength = 63
 // characters. Compiled once at package level to avoid recompiling on
 // every sanitizeK8sName call.
 var reNonAlphaNum = regexp.MustCompile(`[^a-z0-9]+`)
+
+// reClusterName matches a valid Kubernetes label value: lowercase
+// alphanumeric characters or hyphens, must start and end with an
+// alphanumeric character. This prevents YAML injection via cluster
+// names that contain quotes, newlines, or other special characters.
+var reClusterName = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
 
 // TunnelProvider is the server-side abstraction for managing reverse
 // tunnels. It allocates unique endpoints per cluster, signs agent
@@ -149,16 +157,21 @@ func (uc *FleetUseCase) ListClusters() map[string]Cluster {
 // CA certificate, tunnel endpoint, and the server's version.
 func (uc *FleetUseCase) RegisterCluster(cluster, agentID, agentVersion string, csrPEM []byte) (Registration, error) {
 	if cluster == "" {
-		return Registration{}, fmt.Errorf("cluster name must not be empty")
+		return Registration{}, apierrors.NewBadRequest("cluster name must not be empty")
 	}
 	if len(cluster) > maxClusterNameLength {
-		return Registration{}, fmt.Errorf("cluster name must not exceed %d characters", maxClusterNameLength)
+		return Registration{}, apierrors.NewBadRequest(
+			fmt.Sprintf("cluster name must not exceed %d characters", maxClusterNameLength))
+	}
+	if !reClusterName.MatchString(cluster) {
+		return Registration{}, apierrors.NewBadRequest(
+			fmt.Sprintf("cluster name must match [a-z0-9]([a-z0-9-]*[a-z0-9])?, got %q", cluster))
 	}
 	if agentID == "" {
-		return Registration{}, fmt.Errorf("agent ID must not be empty")
+		return Registration{}, apierrors.NewBadRequest("agent ID must not be empty")
 	}
 	if len(csrPEM) == 0 {
-		return Registration{}, fmt.Errorf("CSR must not be empty")
+		return Registration{}, apierrors.NewBadRequest("CSR must not be empty")
 	}
 
 	endpoint, certPEM, err := uc.tunnel.RegisterCluster(cluster, agentID, agentVersion, csrPEM)
@@ -259,19 +272,23 @@ type manifestTokenClaims struct {
 // Deployment that runs the agent with the correct server/tunnel URLs.
 func (uc *FleetUseCase) GenerateAgentManifest(cluster, userName string) (string, error) {
 	if cluster == "" {
-		return "", fmt.Errorf("cluster name must not be empty")
+		return "", apierrors.NewBadRequest("cluster name must not be empty")
+	}
+	if !reClusterName.MatchString(cluster) {
+		return "", apierrors.NewBadRequest(
+			fmt.Sprintf("cluster name must match [a-z0-9]([a-z0-9-]*[a-z0-9])?, got %q", cluster))
 	}
 	if userName == "" {
-		return "", fmt.Errorf("user name must not be empty")
+		return "", apierrors.NewBadRequest("user name must not be empty")
 	}
 
 	data := agentManifestData{
-		Cluster:        cluster,
-		UserName:       userName,
-		SanitizedUser:  sanitizeK8sName(userName),
-		Image:          fmt.Sprintf("ghcr.io/otterscale/otterscale:%s", uc.version),
-		ServerURL:      uc.manifestCfg.ServerURL,
-		TunnelURL:      uc.manifestCfg.TunnelURL,
+		Cluster:       cluster,
+		UserName:      userName,
+		SanitizedUser: sanitizeK8sName(userName),
+		Image:         fmt.Sprintf("ghcr.io/otterscale/otterscale:%s", uc.version),
+		ServerURL:     uc.manifestCfg.ServerURL,
+		TunnelURL:     uc.manifestCfg.TunnelURL,
 	}
 
 	var buf bytes.Buffer
@@ -318,9 +335,23 @@ func sanitizeK8sName(s string) string {
 	return s
 }
 
+// yamlQuote produces a JSON-encoded string (with surrounding quotes)
+// that is safe to embed in a YAML double-quoted scalar. JSON string
+// escaping is a strict subset of YAML double-quoted string escaping,
+// so the result is always valid YAML regardless of the input content.
+func yamlQuote(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
+}
+
 // agentManifestTmpl is the parsed Go template for generating agent
-// installation manifests.
-var agentManifestTmpl = template.Must(template.New("agent-manifest").Parse(agentManifestYAML))
+// installation manifests. The "yamlQuote" function produces a
+// JSON-encoded string that is safe for YAML double-quoted contexts.
+var agentManifestTmpl = template.Must(
+	template.New("agent-manifest").
+		Funcs(template.FuncMap{"yamlQuote": yamlQuote}).
+		Parse(agentManifestYAML),
+)
 
 const agentManifestYAML = `---
 apiVersion: v1
@@ -413,7 +444,7 @@ metadata:
   name: otterscale-{{ .SanitizedUser }}-cluster-admin
 subjects:
   - kind: User
-    name: "{{ .UserName }}"
+    name: {{ yamlQuote .UserName }}
     apiGroup: rbac.authorization.k8s.io
 roleRef:
   kind: ClusterRole
@@ -443,9 +474,9 @@ spec:
             - agent
           env:
             - name: OTTERSCALE_AGENT_SERVER_URL
-              value: "{{ .ServerURL }}"
+              value: {{ yamlQuote .ServerURL }}
             - name: OTTERSCALE_AGENT_TUNNEL_SERVER_URL
-              value: "{{ .TunnelURL }}"
+              value: {{ yamlQuote .TunnelURL }}
             - name: OTTERSCALE_AGENT_CLUSTER
-              value: "{{ .Cluster }}"
+              value: {{ yamlQuote .Cluster }}
 `

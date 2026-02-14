@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	chclient "github.com/jpillora/chisel/client"
@@ -48,7 +49,10 @@ type ClientOption func(*Client)
 // registration, reconnection, and exponential backoff. It uses mTLS
 // for tunnel authentication.
 type Client struct {
+	mu               sync.Mutex       // protects inner and certDir
 	inner            *chclient.Client // owned lifecycle, not exported
+	certDir          string           // temp directory for TLS cert files
+
 	cluster          string
 	serverURL        string
 	tunnelServerURL  string
@@ -60,7 +64,6 @@ type Client struct {
 	maxRetryDelay    time.Duration
 	register         RegisterFunc
 	log              *slog.Logger
-	certDir          string // temp directory for TLS cert files
 }
 
 // WithCluster configures the cluster name used for registration.
@@ -169,7 +172,9 @@ func (c *Client) Start(ctx context.Context) error {
 			continue
 		}
 		bo.Reset()
+		c.mu.Lock()
 		c.inner = inner
+		c.mu.Unlock()
 
 		err = c.runSession(ctx, inner)
 		if ctx.Err() != nil {
@@ -194,8 +199,13 @@ func (c *Client) Start(ctx context.Context) error {
 
 // Stop gracefully shuts down the tunnel client and cleans up temp files.
 func (c *Client) Stop(_ context.Context) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	if c.certDir != "" {
-		_ = os.RemoveAll(c.certDir)
+		if err := os.RemoveAll(c.certDir); err != nil {
+			c.log.Warn("failed to remove cert dir", "error", err)
+		}
 		c.certDir = ""
 	}
 	if c.inner == nil {
@@ -217,15 +227,21 @@ func (c *Client) dial(ctx context.Context) (*chclient.Client, error) {
 
 	// Write mTLS credentials to a temp directory. Clean up old
 	// ones first (from a previous registration attempt).
+	c.mu.Lock()
 	if c.certDir != "" {
-		_ = os.RemoveAll(c.certDir)
+		if err := os.RemoveAll(c.certDir); err != nil {
+			c.log.Warn("failed to remove old cert dir", "error", err)
+		}
 	}
+	c.mu.Unlock()
 
 	dir, err := os.MkdirTemp("", "otterscale-tls-*")
 	if err != nil {
 		return nil, fmt.Errorf("create cert dir: %w", err)
 	}
+	c.mu.Lock()
 	c.certDir = dir
+	c.mu.Unlock()
 
 	caFile := filepath.Join(dir, "ca.pem")
 	certFile := filepath.Join(dir, "cert.pem")
@@ -262,12 +278,16 @@ func (c *Client) runSession(ctx context.Context, inner *chclient.Client) error {
 	c.log.Info("connecting", "server", c.tunnelServerURL)
 
 	if err := inner.Start(ctx); err != nil {
-		_ = inner.Close()
+		if closeErr := inner.Close(); closeErr != nil {
+			c.log.Warn("failed to close inner client after start failure", "error", closeErr)
+		}
 		return fmt.Errorf("start: %w", err)
 	}
 
 	err := inner.Wait()
-	_ = inner.Close()
+	if closeErr := inner.Close(); closeErr != nil {
+		c.log.Warn("failed to close inner client", "error", closeErr)
+	}
 	return err
 }
 

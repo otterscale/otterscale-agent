@@ -99,7 +99,9 @@ func (s *Service) checkClusters(ctx context.Context, dialer net.Dialer, failCoun
 		addr := net.JoinHostPort(host, strconv.Itoa(tunnelPort))
 		conn, err := dialer.DialContext(ctx, "tcp", addr)
 		if err == nil {
-			_ = conn.Close()
+			if closeErr := conn.Close(); closeErr != nil {
+				s.log.Debug("failed to close health check connection", "cluster", cluster, "error", closeErr)
+			}
 			if failCounts[cluster] > 0 {
 				s.log.Debug("cluster recovered", "cluster", cluster)
 			}

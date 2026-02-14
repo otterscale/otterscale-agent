@@ -147,11 +147,6 @@ func (a *Agent) checkVersion(ctx context.Context, reg core.Registration, up *upd
 		"server_version", reg.ServerVersion,
 	)
 
-	if up == nil {
-		log.Warn("self-update disabled (no deployment name configured)")
-		return
-	}
-
 	if err := up.patch(ctx, reg.ServerVersion); err != nil {
 		log.Error("self-update failed", "error", err)
 	}

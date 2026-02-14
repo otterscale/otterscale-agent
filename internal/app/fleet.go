@@ -51,7 +51,7 @@ func (s *FleetService) ListClusters(ctx context.Context, req *pb.ListClustersReq
 func (s *FleetService) Register(ctx context.Context, req *pb.RegisterRequest) (*pb.RegisterResponse, error) {
 	reg, err := s.fleet.RegisterCluster(req.GetCluster(), req.GetAgentId(), req.GetAgentVersion(), req.GetCsr())
 	if err != nil {
-		return nil, err
+		return nil, k8sErrorToConnectError(err)
 	}
 
 	resp := &pb.RegisterResponse{}

@@ -124,14 +124,50 @@ func provideCA(conf *config.Config) (*pki.CA, error) {
 		return nil, fmt.Errorf("export CA key: %w", err)
 	}
 
-	if err := os.WriteFile(certPath, ca.CertPEM(), 0600); err != nil {
+	// Write cert and key atomically (write to temp + rename) so
+	// that a crash between the two writes does not leave a
+	// half-written CA state on disk.
+	if err := atomicWriteFile(certPath, ca.CertPEM(), 0600); err != nil {
 		return nil, fmt.Errorf("write CA cert: %w", err)
 	}
-	if err := os.WriteFile(keyPath, keyPEM, 0600); err != nil {
+	if err := atomicWriteFile(keyPath, keyPEM, 0600); err != nil {
 		return nil, fmt.Errorf("write CA key: %w", err)
 	}
 
 	return ca, nil
+}
+
+// atomicWriteFile writes data to a temporary file in the same
+// directory as path, then renames it into place. This ensures that
+// the target file is either fully written or not present — a crash
+// mid-write cannot leave a partially written file at path.
+func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".tmp.*")
+	if err != nil {
+		return fmt.Errorf("create temp file: %w", err)
+	}
+	tmpPath := tmp.Name()
+
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return fmt.Errorf("write temp file: %w", err)
+	}
+	if err := tmp.Chmod(perm); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return fmt.Errorf("chmod temp file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("close temp file: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("rename temp file: %w", err)
+	}
+	return nil
 }
 
 // provideInClusterConfig is a Wire provider that returns a
