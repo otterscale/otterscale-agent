@@ -16,6 +16,7 @@ import (
 	"encoding/base64"
 	"encoding/pem"
 	"fmt"
+	"io"
 	"math/big"
 	"net"
 	"time"
@@ -230,6 +231,19 @@ func DeriveAuth(agentID string, certPEM []byte) (string, error) {
 	h := sha256.Sum256(block.Bytes)
 	pass := base64.RawURLEncoding.EncodeToString(h[:24])
 	return agentID + ":" + pass, nil
+}
+
+// DeriveHMACKey deterministically derives a 32-byte HMAC key from a
+// seed and a label using HKDF (RFC 5869). This follows the same
+// derivation pattern as the internal deriveKey helper but produces
+// raw key material instead of an ECDSA key.
+func DeriveHMACKey(seed, label string) []byte {
+	h := hkdf.New(sha256.New, []byte(seed), nil, []byte(label))
+	key := make([]byte, 32)
+	// hkdf.New returns an io.Reader that never errors for reads
+	// within the output limit, so this is safe to ignore.
+	io.ReadFull(h, key)
+	return key
 }
 
 // ---------------------------------------------------------------------------

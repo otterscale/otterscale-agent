@@ -1,6 +1,7 @@
 package pki
 
 import (
+	"bytes"
 	"crypto/x509"
 	"encoding/pem"
 	"testing"
@@ -225,6 +226,32 @@ func TestDeriveAuth_InvalidPEM(t *testing.T) {
 	_, err := DeriveAuth("agent", []byte("not-a-pem"))
 	if err == nil {
 		t.Error("expected error for invalid PEM, got nil")
+	}
+}
+
+func TestDeriveHMACKey_Deterministic(t *testing.T) {
+	k1 := DeriveHMACKey("seed-a", "label-1")
+	k2 := DeriveHMACKey("seed-a", "label-1")
+
+	if len(k1) != 32 {
+		t.Fatalf("expected 32-byte key, got %d", len(k1))
+	}
+
+	if !bytes.Equal(k1, k2) {
+		t.Error("expected identical keys for same seed and label")
+	}
+}
+
+func TestDeriveHMACKey_DifferentInputs(t *testing.T) {
+	base := DeriveHMACKey("seed", "label")
+	diffSeed := DeriveHMACKey("other-seed", "label")
+	diffLabel := DeriveHMACKey("seed", "other-label")
+
+	if bytes.Equal(base, diffSeed) {
+		t.Error("expected different keys for different seeds")
+	}
+	if bytes.Equal(base, diffLabel) {
+		t.Error("expected different keys for different labels")
 	}
 }
 

@@ -10,16 +10,12 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
-	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/signal"
 	"syscall"
 
 	"github.com/spf13/cobra"
-	"golang.org/x/crypto/hkdf"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
@@ -99,9 +95,9 @@ func newCmd(conf *config.Config) (*cobra.Command, error) {
 // runtime.
 func provideCA(conf *config.Config) (*pki.CA, error) {
 	seed := conf.ServerTunnelCASeed()
-	if seed == "change-me" {
-		return nil, errors.New("refusing to start: tunnel CA seed is the insecure default \"change-me\"; " +
-			"set --tunnel-ca-seed or OTTERSCALE_SERVER_TUNNEL_CA_SEED to a unique secret")
+	if seed == config.InsecureDefaultCASeed {
+		return nil, fmt.Errorf("refusing to start: tunnel CA seed is the insecure default %q; "+
+			"set --tunnel-ca-seed or OTTERSCALE_SERVER_TUNNEL_CA_SEED to a unique secret", config.InsecureDefaultCASeed)
 	}
 	return pki.NewCAFromSeed(seed)
 }
@@ -119,19 +115,11 @@ func provideInClusterConfig() (*rest.Config, error) {
 
 // provideAgentManifestConfig is a Wire provider that extracts the
 // external URLs from the server configuration and derives an HMAC key
-// for signing stateless manifest tokens. The key is derived from the
-// CA seed using HKDF with a distinct label, following the same
-// pattern as pki.deriveKey.
+// for signing stateless manifest tokens.
 func provideAgentManifestConfig(conf *config.Config) core.AgentManifestConfig {
-	h := hkdf.New(sha256.New, []byte(conf.ServerTunnelCASeed()), nil, []byte("manifest-token"))
-	key := make([]byte, 32)
-	// hkdf.New returns an io.Reader that never errors for reads
-	// within the output limit, so this is safe to ignore.
-	io.ReadFull(h, key)
-
 	return core.AgentManifestConfig{
 		ServerURL: conf.ServerExternalURL(),
 		TunnelURL: conf.ServerExternalTunnelURL(),
-		HMACKey:   key,
+		HMACKey:   pki.DeriveHMACKey(conf.ServerTunnelCASeed(), "manifest-token"),
 	}
 }

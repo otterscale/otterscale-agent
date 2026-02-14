@@ -4,6 +4,12 @@ import (
 	"strings"
 )
 
+// InsecureDefaultCASeed is the compiled default for the tunnel CA
+// seed. It exists only so that the binary can start without
+// configuration for development; production deployments MUST replace
+// it with a unique secret.
+const InsecureDefaultCASeed = "change-me"
+
 // Option describes a single configuration entry: its viper key, the
 // corresponding CLI flag name, the compiled default, and a
 // human-readable description shown in --help output.
@@ -20,7 +26,7 @@ var ServerOptions = []Option{
 	{Key: keyServerAddress, Flag: toFlag(keyServerAddress), Default: ":8299", Description: "Server listen address"},
 	{Key: keyServerAllowedOrigins, Flag: toFlag(keyServerAllowedOrigins), Default: []string{}, Description: "Server allowed origins"},
 	{Key: keyServerTunnelAddress, Flag: toFlag(keyServerTunnelAddress), Default: "127.0.0.1:8300", Description: "Server tunnel address"},
-	{Key: keyServerTunnelCASeed, Flag: toFlag(keyServerTunnelCASeed), Default: "change-me", Description: "Server tunnel CA seed for mTLS certificate issuance"},
+	{Key: keyServerTunnelCASeed, Flag: toFlag(keyServerTunnelCASeed), Default: InsecureDefaultCASeed, Description: "Server tunnel CA seed for mTLS certificate issuance"},
 	{Key: keyServerKeycloakRealmURL, Flag: toFlag(keyServerKeycloakRealmURL), Default: "", Description: "Server keycloak realm url (required)"},
 	{Key: keyServerKeycloakClientID, Flag: toFlag(keyServerKeycloakClientID), Default: "otterscale-server", Description: "Server keycloak client id"},
 	{Key: keyServerExternalURL, Flag: toFlag(keyServerExternalURL), Default: "", Description: "Externally reachable server URL for agent connections (required for manifest generation)"},
