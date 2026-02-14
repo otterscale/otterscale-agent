@@ -9,7 +9,6 @@ import (
 
 	"github.com/Masterminds/semver/v3"
 	"golang.org/x/sync/singleflight"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -388,7 +387,7 @@ func (uc *ResourceUseCase) fromYAML(manifest []byte) (*unstructured.Unstructured
 	obj := &unstructured.Unstructured{}
 
 	if _, _, err := dec.Decode(manifest, nil, obj); err != nil {
-		return nil, apierrors.NewBadRequest(fmt.Sprintf("invalid manifest: %s", err))
+		return nil, &ErrInvalidInput{Field: "manifest", Message: fmt.Sprintf("invalid YAML: %s", err)}
 	}
 
 	return obj, nil

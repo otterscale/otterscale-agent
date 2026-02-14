@@ -21,3 +21,29 @@ type ErrNotReady struct {
 func (e *ErrNotReady) Error() string {
 	return fmt.Sprintf("%s not initialized", e.Subsystem)
 }
+
+// ErrInvalidInput indicates a domain-level input validation failure.
+// It replaces the use of k8s apierrors.NewBadRequest in the domain
+// layer, keeping the core package free of infrastructure error types.
+type ErrInvalidInput struct {
+	Field   string
+	Message string
+}
+
+func (e *ErrInvalidInput) Error() string {
+	if e.Field != "" {
+		return fmt.Sprintf("invalid %s: %s", e.Field, e.Message)
+	}
+	return e.Message
+}
+
+// ErrSessionNotFound indicates that a requested session (exec or
+// port-forward) does not exist in the session store.
+type ErrSessionNotFound struct {
+	Resource string
+	ID       string
+}
+
+func (e *ErrSessionNotFound) Error() string {
+	return fmt.Sprintf("%s %q not found", e.Resource, e.ID)
+}

@@ -8,9 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/tools/remotecommand"
 )
 
 // ---------------------------------------------------------------------------
@@ -64,7 +62,7 @@ type ExecOptions struct {
 	Stdin     io.Reader
 	Stdout    io.Writer
 	Stderr    io.Writer
-	SizeQueue remotecommand.TerminalSizeQueue
+	SizeQueue TerminalSizer
 }
 
 // PortForwardOptions holds parameters for a port-forward session.
@@ -75,27 +73,43 @@ type PortForwardOptions struct {
 }
 
 // ---------------------------------------------------------------------------
-// Terminal size queue
+// Terminal size types
 // ---------------------------------------------------------------------------
 
-// TerminalSizeQueue implements remotecommand.TerminalSizeQueue using a
-// buffered channel. Resize events are enqueued via Set and dequeued by
-// the remotecommand executor via Next.
+// TerminalSize holds terminal dimensions. This is a domain-level type
+// that decouples the core layer from k8s.io/client-go/tools/remotecommand.
+// The adapter layer is responsible for converting this to the
+// remotecommand.TerminalSize type required by SPDY executors.
+type TerminalSize struct {
+	Width  uint16
+	Height uint16
+}
+
+// TerminalSizer provides the next terminal size event. Implementations
+// block until an event is available or return nil when no more events
+// will be produced (e.g. the queue is closed).
+type TerminalSizer interface {
+	Next() *TerminalSize
+}
+
+// TerminalSizeQueue is a buffered, concurrency-safe queue that
+// implements TerminalSizer. Resize events are enqueued via Set and
+// dequeued via Next.
 type TerminalSizeQueue struct {
 	mu     sync.Mutex
-	ch     chan remotecommand.TerminalSize
+	ch     chan TerminalSize
 	closed bool
 }
 
 // NewTerminalSizeQueue returns a TerminalSizeQueue with a small buffer
 // so resize events can be sent without blocking.
 func NewTerminalSizeQueue() *TerminalSizeQueue {
-	return &TerminalSizeQueue{ch: make(chan remotecommand.TerminalSize, 4)}
+	return &TerminalSizeQueue{ch: make(chan TerminalSize, 4)}
 }
 
 // Next returns the next terminal size event. It blocks until an event
 // is available or the channel is closed (returns nil).
-func (q *TerminalSizeQueue) Next() *remotecommand.TerminalSize {
+func (q *TerminalSizeQueue) Next() *TerminalSize {
 	size, ok := <-q.ch
 	if !ok {
 		return nil
@@ -116,11 +130,11 @@ func (q *TerminalSizeQueue) Set(width, height uint16) {
 	}
 
 	select {
-	case q.ch <- remotecommand.TerminalSize{Width: width, Height: height}:
+	case q.ch <- TerminalSize{Width: width, Height: height}:
 	default:
 		// Drop the oldest and push the new size.
 		<-q.ch
-		q.ch <- remotecommand.TerminalSize{Width: width, Height: height}
+		q.ch <- TerminalSize{Width: width, Height: height}
 	}
 }
 
@@ -292,7 +306,7 @@ func NewRuntimeUseCase(discovery DiscoveryClient, runtime RuntimeRepo) *RuntimeU
 // StartPodLogs validates the request and opens a streaming log reader.
 func (uc *RuntimeUseCase) StartPodLogs(ctx context.Context, cluster, namespace, name string, opts PodLogOptions) (io.ReadCloser, error) {
 	if name == "" {
-		return nil, apierrors.NewBadRequest("pod name is required")
+		return nil, &ErrInvalidInput{Field: "name", Message: "pod name is required"}
 	}
 	return uc.runtime.PodLogs(ctx, cluster, namespace, name, opts)
 }
@@ -302,10 +316,10 @@ func (uc *RuntimeUseCase) StartPodLogs(ctx context.Context, cluster, namespace, 
 // readers that the caller can stream from.
 func (uc *RuntimeUseCase) StartExec(ctx context.Context, cluster, namespace, name string, container string, command []string, tty bool, rows, cols uint16) (*ExecSession, io.ReadCloser, io.ReadCloser, error) {
 	if name == "" {
-		return nil, nil, nil, apierrors.NewBadRequest("pod name is required")
+		return nil, nil, nil, &ErrInvalidInput{Field: "name", Message: "pod name is required"}
 	}
 	if len(command) == 0 {
-		return nil, nil, nil, apierrors.NewBadRequest("command is required")
+		return nil, nil, nil, &ErrInvalidInput{Field: "command", Message: "command is required"}
 	}
 
 	stdinR, stdinW := io.Pipe()
@@ -330,6 +344,7 @@ func (uc *RuntimeUseCase) StartExec(ctx context.Context, cluster, namespace, nam
 	}
 
 	go func() {
+		defer stdinR.Close()
 		defer stdoutW.Close()
 		defer stderrW.Close()
 		defer sizeQueue.Close()
@@ -358,7 +373,7 @@ func (uc *RuntimeUseCase) StartExec(ctx context.Context, cluster, namespace, nam
 func (uc *RuntimeUseCase) WriteExec(sessionID string, data []byte) error {
 	sess, ok := uc.sessions.GetExec(sessionID)
 	if !ok {
-		return apierrors.NewNotFound(schema.GroupResource{Resource: "exec-sessions"}, sessionID)
+		return &ErrSessionNotFound{Resource: "exec-session", ID: sessionID}
 	}
 	_, err := sess.Stdin.Write(data)
 	return err
@@ -368,7 +383,7 @@ func (uc *RuntimeUseCase) WriteExec(sessionID string, data []byte) error {
 func (uc *RuntimeUseCase) ResizeExec(sessionID string, rows, cols uint16) error {
 	sess, ok := uc.sessions.GetExec(sessionID)
 	if !ok {
-		return apierrors.NewNotFound(schema.GroupResource{Resource: "exec-sessions"}, sessionID)
+		return &ErrSessionNotFound{Resource: "exec-session", ID: sessionID}
 	}
 	sess.SizeQueue.Set(cols, rows)
 	return nil
@@ -390,10 +405,10 @@ func (uc *RuntimeUseCase) CleanupExec(sessionID string) {
 // together with a reader for data coming from the pod.
 func (uc *RuntimeUseCase) StartPortForward(ctx context.Context, cluster, namespace, name string, port int32) (*PortForwardSession, io.ReadCloser, error) {
 	if name == "" {
-		return nil, nil, apierrors.NewBadRequest("pod name is required")
+		return nil, nil, &ErrInvalidInput{Field: "name", Message: "pod name is required"}
 	}
 	if port <= 0 || port > 65535 {
-		return nil, nil, apierrors.NewBadRequest("port must be between 1 and 65535")
+		return nil, nil, &ErrInvalidInput{Field: "port", Message: "must be between 1 and 65535"}
 	}
 
 	dataInR, dataInW := io.Pipe()
@@ -426,7 +441,7 @@ func (uc *RuntimeUseCase) StartPortForward(ctx context.Context, cluster, namespa
 func (uc *RuntimeUseCase) WritePortForward(sessionID string, data []byte) error {
 	sess, ok := uc.sessions.GetPortForward(sessionID)
 	if !ok {
-		return apierrors.NewNotFound(schema.GroupResource{Resource: "portforward-sessions"}, sessionID)
+		return &ErrSessionNotFound{Resource: "portforward-session", ID: sessionID}
 	}
 	_, err := sess.Writer.Write(data)
 	return err

@@ -15,6 +15,7 @@ import (
 var ProviderSet = wire.NewSet(
 	agent.NewAgent,
 	agent.NewHandler,
+	agent.NewUpdater,
 	server.NewServer,
 	server.NewHandler,
 )

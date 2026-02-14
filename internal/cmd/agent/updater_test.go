@@ -9,7 +9,7 @@ import (
 )
 
 func TestPatch_InvalidVersion(t *testing.T) {
-	u := newUpdater(&rest.Config{})
+	u := NewUpdater(&rest.Config{})
 
 	tests := []struct {
 		name    string
@@ -26,7 +26,7 @@ func TestPatch_InvalidVersion(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := u.patch(context.Background(), tt.version)
+			err := u.Patch(context.Background(), tt.version)
 			if err == nil {
 				t.Errorf("expected error for version %q, got nil", tt.version)
 			}
@@ -37,7 +37,7 @@ func TestPatch_InvalidVersion(t *testing.T) {
 func TestPatch_ValidVersion(t *testing.T) {
 	// These versions should pass the semver validation but fail
 	// later at the Kubernetes client step (no in-cluster config).
-	u := newUpdater(&rest.Config{})
+	u := NewUpdater(&rest.Config{})
 
 	tests := []struct {
 		name    string
@@ -51,7 +51,7 @@ func TestPatch_ValidVersion(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := u.patch(context.Background(), tt.version)
+			err := u.Patch(context.Background(), tt.version)
 			if err == nil {
 				// If it succeeds we're probably in-cluster, which is fine.
 				return
@@ -73,11 +73,12 @@ func TestImageRef(t *testing.T) {
 	}
 }
 
-func TestDetectNamespace_FallbackToDefault(t *testing.T) {
-	// Outside a Kubernetes cluster, detectNamespace should return "default".
-	ns := detectNamespace()
-	if ns != "default" {
-		t.Errorf("expected default namespace outside cluster, got %q", ns)
+func TestDetectNamespace_ErrorOutsideCluster(t *testing.T) {
+	// Outside a Kubernetes cluster, detectNamespace should return an
+	// error instead of silently falling back to "default".
+	_, err := detectNamespace()
+	if err == nil {
+		t.Error("expected error for detectNamespace outside cluster, got nil")
 	}
 }
 

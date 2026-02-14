@@ -33,7 +33,8 @@ const (
 const inClusterNamespacePath = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
 
 // updater performs in-cluster Deployment image patches so the agent
-// can self-update to match the server version.
+// can self-update to match the server version. It implements the
+// SelfUpdater interface.
 type updater struct {
 	mu     sync.Mutex
 	client kubernetes.Interface // cached clientset
@@ -41,10 +42,12 @@ type updater struct {
 	log    *slog.Logger
 }
 
-// newUpdater returns an updater configured with the Deployment
-// coordinates. Values are read from environment variables with
-// sensible defaults.
-func newUpdater(cfg *rest.Config) *updater {
+// Verify at compile time that *updater satisfies SelfUpdater.
+var _ SelfUpdater = (*updater)(nil)
+
+// NewUpdater returns a SelfUpdater that patches the agent Deployment
+// in-cluster. It is exported for Wire injection.
+func NewUpdater(cfg *rest.Config) SelfUpdater {
 	return &updater{
 		cfg: cfg,
 		log: slog.Default().With("component", "updater"),
@@ -85,7 +88,7 @@ type containerImagePatch struct {
 // other Deployment configuration (resources, env, volumes, etc.).
 // The version string is validated as semver to prevent arbitrary
 // image tag injection from a compromised server.
-func (u *updater) patch(ctx context.Context, version string) error {
+func (u *updater) Patch(ctx context.Context, version string) error {
 	// Validate the version is a legitimate semver tag to prevent
 	// arbitrary image injection (e.g. "latest@sha256:malicious...").
 	if _, err := semver.StrictNewVersion(strings.TrimPrefix(version, "v")); err != nil {
@@ -119,7 +122,10 @@ func (u *updater) patch(ctx context.Context, version string) error {
 		return fmt.Errorf("marshal patch: %w", err)
 	}
 
-	namespace := detectNamespace()
+	namespace, err := detectNamespace()
+	if err != nil {
+		return fmt.Errorf("self-update: %w", err)
+	}
 
 	u.log.Info("patching agent deployment",
 		"deployment", deploymentName,
@@ -163,14 +169,17 @@ func (u *updater) getOrCreateClient() (kubernetes.Interface, error) {
 }
 
 // detectNamespace reads the pod namespace from the standard in-cluster
-// service account mount. It returns "default" if detection fails.
-func detectNamespace() string {
+// service account mount. It returns an error if the file is missing or
+// empty, preventing the updater from accidentally patching a Deployment
+// in the wrong namespace.
+func detectNamespace() (string, error) {
 	data, err := os.ReadFile(inClusterNamespacePath)
 	if err != nil {
-		return "default"
+		return "", fmt.Errorf("detect namespace: %w (not running in-cluster?)", err)
 	}
-	if ns := strings.TrimSpace(string(data)); ns != "" {
-		return ns
+	ns := strings.TrimSpace(string(data))
+	if ns == "" {
+		return "", fmt.Errorf("detect namespace: file %s is empty", inClusterNamespacePath)
 	}
-	return "default"
+	return ns, nil
 }

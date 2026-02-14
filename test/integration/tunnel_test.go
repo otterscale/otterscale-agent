@@ -10,13 +10,14 @@ import (
 	"github.com/otterscale/otterscale-agent/internal/core"
 	"github.com/otterscale/otterscale-agent/internal/pki"
 	"github.com/otterscale/otterscale-agent/internal/providers/chisel"
+	"github.com/otterscale/otterscale-agent/internal/providers/manifest"
 	tunneltransport "github.com/otterscale/otterscale-agent/internal/transport/tunnel"
 )
 
 func TestFleetRegisterClusterUsesSingleSharedTunnelPort(t *testing.T) {
 	tunnel := newTestTunnel(t)
 	initTunnelServer(t, tunnel)
-	fleet, err := core.NewFleetUseCase(tunnel, "test", testManifestConfig())
+	fleet, err := core.NewFleetUseCase(tunnel, "test", testManifestConfig(), manifest.NewRenderer())
 	if err != nil {
 		t.Fatalf("create fleet use case: %v", err)
 	}
@@ -64,7 +65,7 @@ func TestFleetRegisterClusterUsesSingleSharedTunnelPort(t *testing.T) {
 func TestFleetRegisterClusterLatestAgentWinsForSameCluster(t *testing.T) {
 	tunnel := newTestTunnel(t)
 	initTunnelServer(t, tunnel)
-	fleet, err := core.NewFleetUseCase(tunnel, "test", testManifestConfig())
+	fleet, err := core.NewFleetUseCase(tunnel, "test", testManifestConfig(), manifest.NewRenderer())
 	if err != nil {
 		t.Fatalf("create fleet use case: %v", err)
 	}
@@ -101,7 +102,7 @@ func TestFleetRegisterClusterLatestAgentWinsForSameCluster(t *testing.T) {
 func TestFleetRegisterClusterReregisterAndReplaceAcrossAgents(t *testing.T) {
 	tunnel := newTestTunnel(t)
 	initTunnelServer(t, tunnel)
-	fleet, err := core.NewFleetUseCase(tunnel, "test", testManifestConfig())
+	fleet, err := core.NewFleetUseCase(tunnel, "test", testManifestConfig(), manifest.NewRenderer())
 	if err != nil {
 		t.Fatalf("create fleet use case: %v", err)
 	}

@@ -36,11 +36,18 @@ var statusReasonToConnectCode = map[metav1.StatusReason]connect.Code{
 
 // k8sErrorToConnectError converts a Kubernetes API error or a domain
 // error into a ConnectRPC error with a semantically equivalent code.
-// Domain errors (ErrClusterNotFound, ErrNotReady) are checked first,
-// then Kubernetes APIStatus errors. Unrecognised errors fall back to
-// connect.CodeInternal.
+// Domain errors are checked first, then Kubernetes APIStatus errors.
+// Unrecognised errors fall back to connect.CodeInternal.
 func k8sErrorToConnectError(err error) error {
 	// Domain error mapping.
+	var invalidInput *core.ErrInvalidInput
+	if errors.As(err, &invalidInput) {
+		return connect.NewError(connect.CodeInvalidArgument, err)
+	}
+	var sessionNotFound *core.ErrSessionNotFound
+	if errors.As(err, &sessionNotFound) {
+		return connect.NewError(connect.CodeNotFound, err)
+	}
 	var clusterNotFound *core.ErrClusterNotFound
 	if errors.As(err, &clusterNotFound) {
 		return connect.NewError(connect.CodeNotFound, err)

@@ -5,9 +5,11 @@ package providers
 import (
 	"github.com/google/wire"
 
+	"github.com/otterscale/otterscale-agent/internal/cmd/server"
 	"github.com/otterscale/otterscale-agent/internal/core"
 	"github.com/otterscale/otterscale-agent/internal/providers/chisel"
 	"github.com/otterscale/otterscale-agent/internal/providers/kubernetes"
+	"github.com/otterscale/otterscale-agent/internal/providers/manifest"
 	"github.com/otterscale/otterscale-agent/internal/providers/otterscale"
 )
 
@@ -15,6 +17,9 @@ import (
 var ProviderSet = wire.NewSet(
 	chisel.NewService,
 	wire.Bind(new(core.TunnelProvider), new(*chisel.Service)),
+	wire.Bind(new(server.TunnelService), new(*chisel.Service)),
+	manifest.NewRenderer,
+	wire.Bind(new(core.ManifestRenderer), new(*manifest.Renderer)),
 	kubernetes.New,
 	kubernetes.NewDiscoveryClient,
 	kubernetes.NewResourceRepo,

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -116,7 +117,7 @@ func (r *runtimeRepo) Exec(ctx context.Context, cluster, namespace, name string,
 		Tty:    opts.TTY,
 	}
 	if opts.TTY && opts.SizeQueue != nil {
-		streamOpts.TerminalSizeQueue = opts.SizeQueue
+		streamOpts.TerminalSizeQueue = &sizeQueueAdapter{inner: opts.SizeQueue}
 	}
 
 	return executor.StreamWithContext(ctx, streamOpts)
@@ -277,8 +278,15 @@ func (r *runtimeRepo) PortForward(ctx context.Context, cluster, namespace, name 
 	}
 	defer dataStream.Close()
 
+	// Track all goroutines with a WaitGroup so we guarantee every
+	// goroutine has exited before PortForward returns, preventing
+	// goroutine leaks.
+	var wg sync.WaitGroup
+
 	// Check for immediate errors from kubelet.
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		buf := make([]byte, 1024)
 		n, _ := errorStream.Read(buf)
 		if n > 0 {
@@ -292,12 +300,15 @@ func (r *runtimeRepo) PortForward(ctx context.Context, cluster, namespace, name 
 	// Bidirectional copy — wait for BOTH directions to complete.
 	errCh := make(chan error, 2)
 
+	wg.Add(2)
 	go func() {
+		defer wg.Done()
 		_, err := io.Copy(dataStream, opts.Stdin)
 		errCh <- err
 	}()
 
 	go func() {
+		defer wg.Done()
 		_, err := io.Copy(opts.Stdout, dataStream)
 		errCh <- err
 	}()
@@ -306,6 +317,10 @@ func (r *runtimeRepo) PortForward(ctx context.Context, cluster, namespace, name 
 	for i := 0; i < 2; i++ {
 		select {
 		case <-ctx.Done():
+			// Close the stream connection to unblock all goroutines,
+			// then wait for them to finish.
+			streamConn.Close()
+			wg.Wait()
 			return ctx.Err()
 		case err := <-errCh:
 			if err != nil && firstErr == nil {
@@ -316,12 +331,34 @@ func (r *runtimeRepo) PortForward(ctx context.Context, cluster, namespace, name 
 			}
 		}
 	}
+
+	// Wait for the error stream goroutine to exit before returning.
+	wg.Wait()
 	return firstErr
 }
 
 // portForwardProtocolV1 is the subprotocol used for Kubernetes port
 // forwarding over SPDY.
 const portForwardProtocolV1 = "portforward.k8s.io"
+
+// ---------------------------------------------------------------------------
+// Terminal size adapter
+// ---------------------------------------------------------------------------
+
+// sizeQueueAdapter bridges the domain core.TerminalSizer interface to
+// the remotecommand.TerminalSizeQueue interface required by SPDY
+// executors. This keeps the domain layer free of client-go dependencies.
+type sizeQueueAdapter struct {
+	inner core.TerminalSizer
+}
+
+func (a *sizeQueueAdapter) Next() *remotecommand.TerminalSize {
+	s := a.inner.Next()
+	if s == nil {
+		return nil
+	}
+	return &remotecommand.TerminalSize{Width: s.Width, Height: s.Height}
+}
 
 // ---------------------------------------------------------------------------
 // Client helpers

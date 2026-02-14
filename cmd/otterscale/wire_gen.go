@@ -15,6 +15,7 @@ import (
 	"github.com/otterscale/otterscale-agent/internal/core"
 	"github.com/otterscale/otterscale-agent/internal/providers/chisel"
 	"github.com/otterscale/otterscale-agent/internal/providers/kubernetes"
+	"github.com/otterscale/otterscale-agent/internal/providers/manifest"
 	"github.com/otterscale/otterscale-agent/internal/providers/otterscale"
 	"github.com/spf13/cobra"
 )
@@ -50,7 +51,8 @@ func wireServer(v core.Version, conf *config.Config) (*server.Server, func(), er
 	if err != nil {
 		return nil, nil, err
 	}
-	fleetUseCase, err := core.NewFleetUseCase(service, v, agentManifestConfig)
+	renderer := manifest.NewRenderer()
+	fleetUseCase, err := core.NewFleetUseCase(service, v, agentManifestConfig, renderer)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -86,7 +88,8 @@ func wireAgent(v core.Version) (*agent.Agent, func(), error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	agentAgent := agent.NewAgent(restConfig, handler, tunnelConsumer, v, bootstrapper)
+	selfUpdater := agent.NewUpdater(restConfig)
+	agentAgent := agent.NewAgent(restConfig, handler, tunnelConsumer, v, bootstrapper, selfUpdater)
 	return agentAgent, func() {
 	}, nil
 }

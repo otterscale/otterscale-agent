@@ -27,6 +27,12 @@ type Config struct {
 	Bootstrap       bool
 }
 
+// SelfUpdater abstracts the self-update mechanism so it can be
+// injected via DI and mocked in tests.
+type SelfUpdater interface {
+	Patch(ctx context.Context, version string) error
+}
+
 // Agent binds a local HTTP reverse-proxy to a dynamically allocated
 // port and exposes it to the control-plane via a chisel tunnel.
 type Agent struct {
@@ -35,13 +41,14 @@ type Agent struct {
 	tunnel       core.TunnelConsumer
 	version      core.Version
 	bootstrapper *bootstrap.Bootstrapper
+	updater      SelfUpdater
 }
 
 // NewAgent returns an Agent wired to the given handler, tunnel
-// consumer, and bootstrapper. version is injected via DI and used for
-// version-mismatch detection during registration.
-func NewAgent(cfg *rest.Config, handler *Handler, tunnel core.TunnelConsumer, version core.Version, bootstrapper *bootstrap.Bootstrapper) *Agent {
-	return &Agent{cfg: cfg, handler: handler, tunnel: tunnel, version: version, bootstrapper: bootstrapper}
+// consumer, bootstrapper, and self-updater. version is injected via
+// DI and used for version-mismatch detection during registration.
+func NewAgent(cfg *rest.Config, handler *Handler, tunnel core.TunnelConsumer, version core.Version, bootstrapper *bootstrap.Bootstrapper, updater SelfUpdater) *Agent {
+	return &Agent{cfg: cfg, handler: handler, tunnel: tunnel, version: version, bootstrapper: bootstrapper, updater: updater}
 }
 
 // Run starts the agent. When bootstrap is enabled, it first applies
@@ -93,8 +100,6 @@ func (a *Agent) Run(ctx context.Context, cfg Config) error {
 // version diverges from the agent version and, if so, triggers a
 // self-update by patching its own Deployment image.
 func (a *Agent) register() tunnel.RegisterFunc {
-	up := newUpdater(a.cfg)
-
 	return func(ctx context.Context, serverURL, cluster string) (*tunnel.RegisterResult, error) {
 		reg, err := a.tunnel.Register(ctx, serverURL, cluster)
 		if err != nil {
@@ -102,7 +107,7 @@ func (a *Agent) register() tunnel.RegisterFunc {
 		}
 
 		// Check version and trigger self-update if needed.
-		a.checkVersion(ctx, reg, up)
+		a.checkVersion(ctx, reg)
 
 		// Derive the chisel auth string from the signed
 		// certificate. This must match the password the server
@@ -127,7 +132,7 @@ func (a *Agent) register() tunnel.RegisterFunc {
 // Deployment image to trigger a rolling update. Errors are logged but
 // do not prevent the tunnel from connecting — the agent continues to
 // serve with the current version.
-func (a *Agent) checkVersion(ctx context.Context, reg core.Registration, up *updater) {
+func (a *Agent) checkVersion(ctx context.Context, reg core.Registration) {
 	log := slog.Default().With("component", "version-check")
 
 	if reg.ServerVersion == "" {
@@ -147,7 +152,7 @@ func (a *Agent) checkVersion(ctx context.Context, reg core.Registration, up *upd
 		"server_version", reg.ServerVersion,
 	)
 
-	if err := up.patch(ctx, reg.ServerVersion); err != nil {
+	if err := a.updater.Patch(ctx, reg.ServerVersion); err != nil {
 		log.Error("self-update failed", "error", err)
 	}
 }

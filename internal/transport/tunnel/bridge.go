@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"os"
 	"sync"
 
 	"github.com/otterscale/otterscale-agent/internal/transport/pipe"
@@ -66,9 +67,11 @@ func (b *Bridge) Start(ctx context.Context) error {
 			if ctx.Err() != nil {
 				break
 			}
-			// Temporary errors (e.g. too many open files) are
-			// retried; permanent errors stop the loop.
-			if ne, ok := err.(net.Error); ok && ne.Timeout() {
+			// Deadline-exceeded errors (e.g. Accept with a
+			// timeout set) are retried; other errors stop the
+			// loop. We use errors.Is instead of the deprecated
+			// net.Error.Timeout() method.
+			if errors.Is(err, os.ErrDeadlineExceeded) {
 				b.log.Warn("temporary accept error", "error", err)
 				continue
 			}
