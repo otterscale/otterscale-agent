@@ -8,53 +8,32 @@
 
 ## Architecture
 
+### Request Sequence
+
 ```mermaid
-graph LR
-    subgraph Control Plane
-        direction TB
-        FS[FleetService]
-        RS[ResourceService]
-        RTS[RuntimeService]
+  sequenceDiagram
+    participant User
+    participant Server as Server (Hub)
+    participant Tunnel as Chisel Tunnel
+    participant Agent as Agent (Spoke)
+    participant K8s as kube-apiserver
 
-        FU[FleetUseCase]
-        RU[ResourceUseCase]
-        RTU[RuntimeUseCase]
+    Note over Agent, Tunnel: Agent startup
+    Agent->>Server: CSR registration (Fleet.Register)
+    Server-->>Agent: mTLS certificate
+    Agent->>Tunnel: Establish reverse tunnel (mTLS)
+    Tunnel-->>Agent: Assigned 127.x.x.x loopback
 
-        FS --> FU
-        RS --> RU
-        RTS --> RTU
-
-        Chisel[Chisel TunnelProvider]
-        MR[ManifestRenderer]
-        FU --> Chisel
-        FU --> MR
-
-        DC[DiscoveryClient]
-        RR[ResourceRepo]
-        SR[SchemaResolver]
-        RU --> DC
-        RU --> RR
-        RU --> SR
-
-        RTR[RuntimeRepo]
-        SS[SessionStore]
-        RTU --> DC
-        RTU --> RTR
-        RTU --> SS
-    end
-
-    subgraph Agent ∙ per cluster
-        direction TB
-        AG[Agent] --> REG[FleetRegistrar]
-        AG --> BS[Bootstrapper]
-        AG --> UP[Updater]
-        AG --> KH[K8s API Handler]
-    end
-
-    Client([Client / UI]) -- ConnectRPC :8299 --> FS & RS & RTS
-    Chisel -- "mTLS tunnel :8300<br/>127.x.x.x:16598" --> AG
-    DC & RR & RTR -. dynamic client .-> Chisel
-    REG -- Register + CSR --> FS
+    Note over User, K8s: User request
+    User->>Server: ConnectRPC + OIDC token
+    Server->>Server: Verify OIDC (Keycloak)
+    Server->>Tunnel: Route to cluster loopback
+    Tunnel->>Agent: Forward request
+    Agent->>K8s: Impersonation (user identity)
+    K8s-->>Agent: Response
+    Agent-->>Tunnel: Response
+    Tunnel-->>Server: Response
+    Server-->>User: ConnectRPC response
 ```
 
 ## 🚀 Quick Start
