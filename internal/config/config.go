@@ -102,10 +102,12 @@ func (c *Config) ServerTunnelAddress() string {
 	return c.v.GetString(keyServerTunnelAddress)
 }
 
-// ServerTunnelCASeed returns the seed used to generate the internal
-// CA for mTLS certificate issuance to agents.
-func (c *Config) ServerTunnelCASeed() string {
-	return c.v.GetString(keyServerTunnelCASeed)
+// ServerTunnelCADir returns the directory path where the CA
+// certificate and private key are persisted. On first startup the
+// server generates a new CA and writes the material to this
+// directory; subsequent restarts load the existing CA.
+func (c *Config) ServerTunnelCADir() string {
+	return c.v.GetString(keyServerTunnelCADir)
 }
 
 // ServerKeycloakRealmURL returns the Keycloak realm issuer URL used

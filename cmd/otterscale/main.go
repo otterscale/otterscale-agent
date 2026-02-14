@@ -11,8 +11,10 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"github.com/spf13/cobra"
@@ -89,17 +91,47 @@ func newCmd(conf *config.Config) (*cobra.Command, error) {
 	return c, nil
 }
 
-// provideCA is a Wire provider that creates a deterministic CA from
-// the configured seed. It validates that the seed is not the insecure
-// default, failing fast at dependency injection time rather than at
-// runtime.
+// provideCA is a Wire provider that loads the CA from the configured
+// directory. On first startup the directory is empty, so a new CA is
+// generated (using crypto/rand backed by a FIPS-approved DRBG) and
+// persisted. Subsequent restarts load the existing CA, keeping
+// previously issued agent certificates valid.
 func provideCA(conf *config.Config) (*pki.CA, error) {
-	seed := conf.ServerTunnelCASeed()
-	if seed == config.InsecureDefaultCASeed {
-		return nil, fmt.Errorf("refusing to start: tunnel CA seed is the insecure default %q; "+
-			"set --tunnel-ca-seed or OTTERSCALE_SERVER_TUNNEL_CA_SEED to a unique secret", config.InsecureDefaultCASeed)
+	dir := conf.ServerTunnelCADir()
+	certPath := filepath.Join(dir, "ca.pem")
+	keyPath := filepath.Join(dir, "ca-key.pem")
+
+	certPEM, errC := os.ReadFile(certPath)
+	keyPEM, errK := os.ReadFile(keyPath)
+	if errC == nil && errK == nil {
+		slog.Info("loading existing CA", "dir", dir)
+		return pki.LoadCA(certPEM, keyPEM)
 	}
-	return pki.NewCAFromSeed(seed)
+
+	// First run: generate and persist.
+	slog.Info("generating new CA", "dir", dir)
+	ca, err := pki.NewCA()
+	if err != nil {
+		return nil, fmt.Errorf("generate CA: %w", err)
+	}
+
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return nil, fmt.Errorf("create CA dir: %w", err)
+	}
+
+	keyPEM, err = ca.KeyPEM()
+	if err != nil {
+		return nil, fmt.Errorf("export CA key: %w", err)
+	}
+
+	if err := os.WriteFile(certPath, ca.CertPEM(), 0600); err != nil {
+		return nil, fmt.Errorf("write CA cert: %w", err)
+	}
+	if err := os.WriteFile(keyPath, keyPEM, 0600); err != nil {
+		return nil, fmt.Errorf("write CA key: %w", err)
+	}
+
+	return ca, nil
 }
 
 // provideInClusterConfig is a Wire provider that returns a
@@ -115,11 +147,17 @@ func provideInClusterConfig() (*rest.Config, error) {
 
 // provideAgentManifestConfig is a Wire provider that extracts the
 // external URLs from the server configuration and derives an HMAC key
-// for signing stateless manifest tokens.
-func provideAgentManifestConfig(conf *config.Config) core.AgentManifestConfig {
+// for signing stateless manifest tokens. The HMAC key is derived from
+// the CA's private key via HKDF, so it is deterministic for the same
+// CA and survives restarts without separate persistence.
+func provideAgentManifestConfig(conf *config.Config, ca *pki.CA) (core.AgentManifestConfig, error) {
+	hmacKey, err := ca.DeriveHMACKey("manifest-token")
+	if err != nil {
+		return core.AgentManifestConfig{}, fmt.Errorf("derive HMAC key: %w", err)
+	}
 	return core.AgentManifestConfig{
 		ServerURL: conf.ServerExternalURL(),
 		TunnelURL: conf.ServerExternalTunnelURL(),
-		HMACKey:   pki.DeriveHMACKey(conf.ServerTunnelCASeed(), "manifest-token"),
-	}
+		HMACKey:   hmacKey,
+	}, nil
 }

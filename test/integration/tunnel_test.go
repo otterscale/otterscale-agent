@@ -150,11 +150,11 @@ func TestFleetRegisterClusterReregisterAndReplaceAcrossAgents(t *testing.T) {
 	}
 }
 
-// newTestTunnel creates a chisel.Service with a deterministic test CA
+// newTestTunnel creates a chisel.Service with a fresh test CA
 // injected at construction time.
 func newTestTunnel(t *testing.T) *chisel.Service {
 	t.Helper()
-	ca, err := pki.NewCAFromSeed("test-ca-seed")
+	ca, err := pki.NewCA()
 	if err != nil {
 		t.Fatalf("create CA: %v", err)
 	}

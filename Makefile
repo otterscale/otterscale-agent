@@ -10,7 +10,7 @@ BOOTSTRAP_DIR := manifests/bootstrap
 .PHONY: build
 # build cli
 build: bootstrap-manifests
-	mkdir -p ./bin && go build -ldflags "-w -s -X main.version=$(VERSION)" -o ./bin/ ./cmd/otterscale/...
+	mkdir -p ./bin && GOFIPS140=latest go build -ldflags "-w -s -X main.version=$(VERSION)" -o ./bin/ ./cmd/otterscale/...
 
 .PHONY: vet
 # examine code

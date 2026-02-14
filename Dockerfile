@@ -13,8 +13,10 @@ RUN go mod download
 # Copy the Go source (relies on .dockerignore to filter)
 COPY . .
 
-# Build the application
-RUN make build
+# Build the application with FIPS 140-3 support.
+# GOFIPS140=latest selects the Go Cryptographic Module and enables
+# FIPS mode by default. The module is pure Go (no cgo required).
+RUN GOFIPS140=latest make build
 
 # Use distroless as minimal base image to package the manager binary
 # Refer to https://github.com/GoogleContainerTools/distroless for more details
@@ -28,8 +30,9 @@ COPY --from=builder /workspace/bin/otterscale .
 # Switch to non-root user
 USER 65532:65532
 
-# Set environment variable
+# Set environment variables
 ENV OTTERSCALE_SERVER_TUNNEL_ADDRESS=0.0.0.0:8300
+ENV GODEBUG=fips140=on
 
 # Expose ports (8299: HTTP/gRPC API, 8300: Tunnel)
 EXPOSE 8299 8300
