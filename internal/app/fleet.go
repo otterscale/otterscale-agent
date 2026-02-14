@@ -6,7 +6,11 @@ package app
 import (
 	"cmp"
 	"context"
+	"errors"
 	"slices"
+
+	"connectrpc.com/authn"
+	"connectrpc.com/connect"
 
 	pb "github.com/otterscale/otterscale-agent/api/fleet/v1"
 	"github.com/otterscale/otterscale-agent/api/fleet/v1/pbconnect"
@@ -55,6 +59,26 @@ func (s *FleetService) Register(ctx context.Context, req *pb.RegisterRequest) (*
 	resp.SetCertificate(reg.Certificate)
 	resp.SetCaCertificate(reg.CACertificate)
 	resp.SetServerVersion(reg.ServerVersion)
+	return resp, nil
+}
+
+// GetAgentManifest returns a multi-document YAML manifest for
+// installing the otterscale agent on the caller's target cluster.
+// The manifest includes a ClusterRoleBinding that grants the
+// authenticated user cluster-admin access.
+func (s *FleetService) GetAgentManifest(ctx context.Context, req *pb.GetAgentManifestRequest) (*pb.GetAgentManifestResponse, error) {
+	userInfo, ok := authn.GetInfo(ctx).(core.UserInfo)
+	if !ok {
+		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("user info not found in context"))
+	}
+
+	manifest, err := s.fleet.GenerateAgentManifest(req.GetCluster(), userInfo.Subject)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+
+	resp := &pb.GetAgentManifestResponse{}
+	resp.SetManifest(manifest)
 	return resp, nil
 }
 

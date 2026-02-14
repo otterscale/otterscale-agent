@@ -100,3 +100,13 @@ func provideCA(conf *config.Config) (*pki.CA, error) {
 	}
 	return pki.NewCAFromSeed(seed)
 }
+
+// provideAgentManifestConfig is a Wire provider that extracts the
+// external URLs from the server configuration. These URLs are embedded
+// in generated agent installation manifests.
+func provideAgentManifestConfig(conf *config.Config) core.AgentManifestConfig {
+	return core.AgentManifestConfig{
+		ServerURL: conf.ServerExternalURL(),
+		TunnelURL: conf.ServerExternalTunnelURL(),
+	}
+}

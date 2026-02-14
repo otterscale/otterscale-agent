@@ -14,8 +14,10 @@ const (
 	keyServerAllowedOrigins   = "server.allowed_origins"
 	keyServerTunnelAddress    = "server.tunnel.address"
 	keyServerTunnelCASeed     = "server.tunnel.ca_seed"
-	keyServerKeycloakRealmURL = "server.keycloak.realm_url"
-	keyServerKeycloakClientID = "server.keycloak.client_id"
+	keyServerKeycloakRealmURL  = "server.keycloak.realm_url"
+	keyServerKeycloakClientID  = "server.keycloak.client_id"
+	keyServerExternalURL       = "server.external_url"
+	keyServerExternalTunnelURL = "server.external_tunnel_url"
 )
 
 // Viper keys for agent-mode configuration.

@@ -25,7 +25,7 @@ func wireCmd() (*cobra.Command, func(), error) {
 // The config parameter provides the CA seed for mTLS certificate
 // issuance via provideCA.
 func wireServer(v core.Version, conf *config.Config) (*server.Server, func(), error) {
-	panic(wire.Build(cmd.ProviderSet, app.ProviderSet, core.ProviderSet, providers.ProviderSet, provideCA))
+	panic(wire.Build(cmd.ProviderSet, app.ProviderSet, core.ProviderSet, providers.ProviderSet, provideCA, provideAgentManifestConfig))
 }
 
 // wireAgent assembles a fully wired Agent with its handler and fleet

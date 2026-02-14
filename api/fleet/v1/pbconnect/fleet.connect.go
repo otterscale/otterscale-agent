@@ -38,6 +38,9 @@ const (
 	FleetServiceListClustersProcedure = "/otterscale.fleet.v1.FleetService/ListClusters"
 	// FleetServiceRegisterProcedure is the fully-qualified name of the FleetService's Register RPC.
 	FleetServiceRegisterProcedure = "/otterscale.fleet.v1.FleetService/Register"
+	// FleetServiceGetAgentManifestProcedure is the fully-qualified name of the FleetService's
+	// GetAgentManifest RPC.
+	FleetServiceGetAgentManifestProcedure = "/otterscale.fleet.v1.FleetService/GetAgentManifest"
 )
 
 // FleetServiceClient is a client for the otterscale.fleet.v1.FleetService service.
@@ -50,6 +53,11 @@ type FleetServiceClient interface {
 	// The agent sends its cluster identity and tunnel port; the server responds
 	// with its fingerprint so the agent can verify the tunnel connection.
 	Register(context.Context, *v1.RegisterRequest) (*v1.RegisterResponse, error)
+	// GetAgentManifest returns a multi-document YAML manifest for installing
+	// the otterscale agent on a target Kubernetes cluster. The manifest
+	// includes a Namespace, ServiceAccount, ClusterRoleBinding (binding the
+	// caller to cluster-admin), and a Deployment running the agent.
+	GetAgentManifest(context.Context, *v1.GetAgentManifestRequest) (*v1.GetAgentManifestResponse, error)
 }
 
 // NewFleetServiceClient constructs a client for the otterscale.fleet.v1.FleetService service. By
@@ -75,13 +83,21 @@ func NewFleetServiceClient(httpClient connect.HTTPClient, baseURL string, opts .
 			connect.WithSchema(fleetServiceMethods.ByName("Register")),
 			connect.WithClientOptions(opts...),
 		),
+		getAgentManifest: connect.NewClient[v1.GetAgentManifestRequest, v1.GetAgentManifestResponse](
+			httpClient,
+			baseURL+FleetServiceGetAgentManifestProcedure,
+			connect.WithSchema(fleetServiceMethods.ByName("GetAgentManifest")),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // fleetServiceClient implements FleetServiceClient.
 type fleetServiceClient struct {
-	listClusters *connect.Client[v1.ListClustersRequest, v1.ListClustersResponse]
-	register     *connect.Client[v1.RegisterRequest, v1.RegisterResponse]
+	listClusters     *connect.Client[v1.ListClustersRequest, v1.ListClustersResponse]
+	register         *connect.Client[v1.RegisterRequest, v1.RegisterResponse]
+	getAgentManifest *connect.Client[v1.GetAgentManifestRequest, v1.GetAgentManifestResponse]
 }
 
 // ListClusters calls otterscale.fleet.v1.FleetService.ListClusters.
@@ -102,6 +118,15 @@ func (c *fleetServiceClient) Register(ctx context.Context, req *v1.RegisterReque
 	return nil, err
 }
 
+// GetAgentManifest calls otterscale.fleet.v1.FleetService.GetAgentManifest.
+func (c *fleetServiceClient) GetAgentManifest(ctx context.Context, req *v1.GetAgentManifestRequest) (*v1.GetAgentManifestResponse, error) {
+	response, err := c.getAgentManifest.CallUnary(ctx, connect.NewRequest(req))
+	if response != nil {
+		return response.Msg, err
+	}
+	return nil, err
+}
+
 // FleetServiceHandler is an implementation of the otterscale.fleet.v1.FleetService service.
 type FleetServiceHandler interface {
 	// ListClusters returns all cluster identifiers that the current agent
@@ -112,6 +137,11 @@ type FleetServiceHandler interface {
 	// The agent sends its cluster identity and tunnel port; the server responds
 	// with its fingerprint so the agent can verify the tunnel connection.
 	Register(context.Context, *v1.RegisterRequest) (*v1.RegisterResponse, error)
+	// GetAgentManifest returns a multi-document YAML manifest for installing
+	// the otterscale agent on a target Kubernetes cluster. The manifest
+	// includes a Namespace, ServiceAccount, ClusterRoleBinding (binding the
+	// caller to cluster-admin), and a Deployment running the agent.
+	GetAgentManifest(context.Context, *v1.GetAgentManifestRequest) (*v1.GetAgentManifestResponse, error)
 }
 
 // NewFleetServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -133,12 +163,21 @@ func NewFleetServiceHandler(svc FleetServiceHandler, opts ...connect.HandlerOpti
 		connect.WithSchema(fleetServiceMethods.ByName("Register")),
 		connect.WithHandlerOptions(opts...),
 	)
+	fleetServiceGetAgentManifestHandler := connect.NewUnaryHandlerSimple(
+		FleetServiceGetAgentManifestProcedure,
+		svc.GetAgentManifest,
+		connect.WithSchema(fleetServiceMethods.ByName("GetAgentManifest")),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/otterscale.fleet.v1.FleetService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case FleetServiceListClustersProcedure:
 			fleetServiceListClustersHandler.ServeHTTP(w, r)
 		case FleetServiceRegisterProcedure:
 			fleetServiceRegisterHandler.ServeHTTP(w, r)
+		case FleetServiceGetAgentManifestProcedure:
+			fleetServiceGetAgentManifestHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -154,4 +193,8 @@ func (UnimplementedFleetServiceHandler) ListClusters(context.Context, *v1.ListCl
 
 func (UnimplementedFleetServiceHandler) Register(context.Context, *v1.RegisterRequest) (*v1.RegisterResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("otterscale.fleet.v1.FleetService.Register is not implemented"))
+}
+
+func (UnimplementedFleetServiceHandler) GetAgentManifest(context.Context, *v1.GetAgentManifestRequest) (*v1.GetAgentManifestResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("otterscale.fleet.v1.FleetService.GetAgentManifest is not implemented"))
 }

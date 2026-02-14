@@ -16,7 +16,7 @@ import (
 func TestFleetRegisterClusterUsesSingleSharedTunnelPort(t *testing.T) {
 	tunnel := newTestTunnel(t)
 	initTunnelServer(t, tunnel)
-	fleet := core.NewFleetUseCase(tunnel, "test")
+	fleet := core.NewFleetUseCase(tunnel, "test", core.AgentManifestConfig{})
 
 	csrA := generateCSR(t, "agent-a")
 	csrB := generateCSR(t, "agent-b")
@@ -61,7 +61,7 @@ func TestFleetRegisterClusterUsesSingleSharedTunnelPort(t *testing.T) {
 func TestFleetRegisterClusterLatestAgentWinsForSameCluster(t *testing.T) {
 	tunnel := newTestTunnel(t)
 	initTunnelServer(t, tunnel)
-	fleet := core.NewFleetUseCase(tunnel, "test")
+	fleet := core.NewFleetUseCase(tunnel, "test", core.AgentManifestConfig{})
 
 	csr1 := generateCSR(t, "agent-r-1")
 	csr2 := generateCSR(t, "agent-r-2")
@@ -95,7 +95,7 @@ func TestFleetRegisterClusterLatestAgentWinsForSameCluster(t *testing.T) {
 func TestFleetRegisterClusterReregisterAndReplaceAcrossAgents(t *testing.T) {
 	tunnel := newTestTunnel(t)
 	initTunnelServer(t, tunnel)
-	fleet := core.NewFleetUseCase(tunnel, "test")
+	fleet := core.NewFleetUseCase(tunnel, "test", core.AgentManifestConfig{})
 
 	csrA := generateCSR(t, "agent-a")
 	csrB := generateCSR(t, "agent-b")

@@ -45,7 +45,8 @@ func wireServer(v core.Version, conf *config.Config) (*server.Server, func(), er
 		return nil, nil, err
 	}
 	service := chisel.NewService(ca)
-	fleetUseCase := core.NewFleetUseCase(service, v)
+	agentManifestConfig := provideAgentManifestConfig(conf)
+	fleetUseCase := core.NewFleetUseCase(service, v, agentManifestConfig)
 	fleetService := app.NewFleetService(fleetUseCase)
 	kubernetesKubernetes := kubernetes.New(service)
 	discoveryClient := kubernetes.NewDiscoveryClient(kubernetesKubernetes)

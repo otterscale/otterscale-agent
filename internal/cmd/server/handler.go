@@ -63,6 +63,9 @@ func (h *Handler) Mount(mux *http.ServeMux) error {
 	}
 
 	// Application service handlers.
+	// RPCs with idempotency_level = NO_SIDE_EFFECTS (e.g. GetAgentManifest)
+	// automatically accept HTTP GET requests via the generated
+	// connect.WithIdempotency(connect.IdempotencyNoSideEffects) option.
 	mux.Handle(fleetv1.NewFleetServiceHandler(h.fleet, interceptors))
 	mux.Handle(resourcev1.NewResourceServiceHandler(h.resource, interceptors))
 	mux.Handle(runtimev1.NewRuntimeServiceHandler(h.runtime, interceptors))

@@ -120,6 +120,18 @@ func (c *Config) ServerKeycloakClientID() string {
 	return c.v.GetString(keyServerKeycloakClientID)
 }
 
+// ServerExternalURL returns the externally reachable server URL that
+// agents use to connect to the control plane.
+func (c *Config) ServerExternalURL() string {
+	return c.v.GetString(keyServerExternalURL)
+}
+
+// ServerExternalTunnelURL returns the externally reachable tunnel URL
+// that agents use to establish reverse tunnels.
+func (c *Config) ServerExternalTunnelURL() string {
+	return c.v.GetString(keyServerExternalTunnelURL)
+}
+
 // ---------------------------------------------------------------------------
 // Agent-mode accessors
 // ---------------------------------------------------------------------------

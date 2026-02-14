@@ -26,6 +26,17 @@ service FleetService {
       name: "fleet-enabled"
     };
   };
+
+  // GetAgentManifest returns a multi-document YAML manifest for installing
+  // the otterscale agent on a target Kubernetes cluster. The manifest
+  // includes a Namespace, ServiceAccount, ClusterRoleBinding (binding the
+  // caller to cluster-admin), and a Deployment running the agent.
+  rpc GetAgentManifest(GetAgentManifestRequest) returns (GetAgentManifestResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+    option (otterscale.api.feature) = {
+      name: "fleet-enabled"
+    };
+  };
 }
 
 message Cluster {
@@ -60,6 +71,21 @@ message RegisterRequest {
 
     // The version of the agent binary (e.g. "v1.2.3"), set at build time.
   string agent_version = 4;
+}
+
+// GetAgentManifestRequest identifies the target cluster for which
+// the agent installation manifest should be generated.
+message GetAgentManifestRequest {
+  // The cluster name the agent will register under.
+  string cluster = 1;
+}
+
+// GetAgentManifestResponse contains the multi-document YAML manifest
+// that can be applied via kubectl to install the agent.
+message GetAgentManifestResponse {
+  // Multi-document YAML containing Namespace, ServiceAccount,
+  // ClusterRoleBinding, and Deployment resources.
+  string manifest = 1;
 }
 
 // RegisterResponse contains a CA-signed certificate and the CA

@@ -4,7 +4,12 @@
 package core
 
 import (
+	"bytes"
 	"context"
+	"fmt"
+	"regexp"
+	"strings"
+	"text/template"
 )
 
 // TunnelProvider is the server-side abstraction for managing reverse
@@ -70,20 +75,36 @@ type Cluster struct {
 	AgentVersion string // agent binary version
 }
 
+// AgentManifestConfig holds the external URLs needed to generate
+// agent installation manifests. These are the advertised endpoints
+// that agents connect to from outside the cluster.
+type AgentManifestConfig struct {
+	// ServerURL is the externally reachable URL of the control-plane
+	// server (e.g. "https://otterscale.example.com").
+	ServerURL string
+	// TunnelURL is the externally reachable URL of the tunnel server
+	// (e.g. "https://tunnel.example.com:8300").
+	TunnelURL string
+}
+
 // FleetUseCase orchestrates cluster registration on the server side.
 // It delegates CSR signing and tunnel setup to the TunnelProvider.
 type FleetUseCase struct {
-	tunnel  TunnelProvider
-	version Version
+	tunnel      TunnelProvider
+	version     Version
+	manifestCfg AgentManifestConfig
 }
 
 // NewFleetUseCase returns a FleetUseCase backed by the given
 // TunnelProvider. version is the server binary version, included in
 // registration responses so agents can detect mismatches.
-func NewFleetUseCase(tunnel TunnelProvider, version Version) *FleetUseCase {
+// manifestCfg provides the external URLs embedded in generated agent
+// installation manifests.
+func NewFleetUseCase(tunnel TunnelProvider, version Version, manifestCfg AgentManifestConfig) *FleetUseCase {
 	return &FleetUseCase{
-		tunnel:  tunnel,
-		version: version,
+		tunnel:      tunnel,
+		version:     version,
+		manifestCfg: manifestCfg,
 	}
 }
 
@@ -107,3 +128,120 @@ func (uc *FleetUseCase) RegisterCluster(cluster, agentID, agentVersion string, c
 		ServerVersion: string(uc.version),
 	}, nil
 }
+
+// GenerateAgentManifest produces a multi-document YAML manifest for
+// installing the otterscale agent on a target Kubernetes cluster.
+// The manifest includes a Namespace, ServiceAccount,
+// ClusterRoleBinding (binding userName to cluster-admin), and a
+// Deployment that runs the agent with the correct server/tunnel URLs.
+func (uc *FleetUseCase) GenerateAgentManifest(cluster, userName string) (string, error) {
+	if cluster == "" {
+		return "", fmt.Errorf("cluster name must not be empty")
+	}
+	if userName == "" {
+		return "", fmt.Errorf("user name must not be empty")
+	}
+
+	data := agentManifestData{
+		Cluster:        cluster,
+		UserName:       userName,
+		SanitizedUser:  sanitizeK8sName(userName),
+		Image:          fmt.Sprintf("ghcr.io/otterscale/otterscale:%s", uc.version),
+		ServerURL:      uc.manifestCfg.ServerURL,
+		TunnelURL:      uc.manifestCfg.TunnelURL,
+	}
+
+	var buf bytes.Buffer
+	if err := agentManifestTmpl.Execute(&buf, data); err != nil {
+		return "", fmt.Errorf("render agent manifest: %w", err)
+	}
+	return buf.String(), nil
+}
+
+// agentManifestData holds the template parameters for agent manifest
+// generation.
+type agentManifestData struct {
+	Cluster       string
+	UserName      string
+	SanitizedUser string
+	Image         string
+	ServerURL     string
+	TunnelURL     string
+}
+
+// sanitizeK8sName converts an arbitrary string (e.g. an OIDC subject
+// or email) into a valid Kubernetes resource name component. It
+// lower-cases the input, replaces non-alphanumeric characters with
+// hyphens, collapses consecutive hyphens, and trims leading/trailing
+// hyphens. The result is truncated to 63 characters (the Kubernetes
+// name length limit).
+func sanitizeK8sName(s string) string {
+	s = strings.ToLower(s)
+	re := regexp.MustCompile(`[^a-z0-9]+`)
+	s = re.ReplaceAllString(s, "-")
+	s = strings.Trim(s, "-")
+	if len(s) > 63 {
+		s = s[:63]
+		s = strings.TrimRight(s, "-")
+	}
+	return s
+}
+
+// agentManifestTmpl is the parsed Go template for generating agent
+// installation manifests.
+var agentManifestTmpl = template.Must(template.New("agent-manifest").Parse(agentManifestYAML))
+
+const agentManifestYAML = `---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: otterscale-system
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: otterscale-agent
+  namespace: otterscale-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: otterscale-{{ .SanitizedUser }}-cluster-admin
+subjects:
+  - kind: User
+    name: "{{ .UserName }}"
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: cluster-admin
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otterscale-agent
+  namespace: otterscale-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: otterscale-agent
+  template:
+    metadata:
+      labels:
+        app: otterscale-agent
+    spec:
+      serviceAccountName: otterscale-agent
+      containers:
+        - name: agent
+          image: {{ .Image }}
+          args:
+            - agent
+          env:
+            - name: OTTERSCALE_AGENT_SERVER_URL
+              value: "{{ .ServerURL }}"
+            - name: OTTERSCALE_AGENT_TUNNEL_SERVER_URL
+              value: "{{ .TunnelURL }}"
+            - name: OTTERSCALE_AGENT_CLUSTER
+              value: "{{ .Cluster }}"
+`
