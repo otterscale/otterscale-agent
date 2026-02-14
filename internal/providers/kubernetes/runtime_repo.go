@@ -394,5 +394,9 @@ func (r *runtimeRepo) dynamicClient(ctx context.Context, cluster string) (*dynam
 	if err != nil {
 		return nil, err
 	}
-	return dynamic.NewForConfig(config)
+	dc, err := dynamic.NewForConfig(config)
+	if err != nil {
+		return nil, &core.DomainError{Code: core.ErrorCodeInternal, Message: "create dynamic client for runtime", Cause: err}
+	}
+	return dc, nil
 }

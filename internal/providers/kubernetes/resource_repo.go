@@ -46,7 +46,7 @@ func (r *resourceRepo) List(
 	namespace string,
 	opts core.ListOptions,
 ) (*unstructured.UnstructuredList, error) {
-	client, err := r.client(ctx, cluster)
+	client, err := r.dynamicClient(ctx, cluster)
 	if err != nil {
 		return nil, err
 	}
@@ -69,7 +69,7 @@ func (r *resourceRepo) Get(
 	gvr schema.GroupVersionResource,
 	namespace, name string,
 ) (*unstructured.Unstructured, error) {
-	client, err := r.client(ctx, cluster)
+	client, err := r.dynamicClient(ctx, cluster)
 	if err != nil {
 		return nil, err
 	}
@@ -86,7 +86,7 @@ func (r *resourceRepo) Create(
 	namespace string,
 	manifest []byte,
 ) (*unstructured.Unstructured, error) {
-	client, err := r.client(ctx, cluster)
+	client, err := r.dynamicClient(ctx, cluster)
 	if err != nil {
 		return nil, err
 	}
@@ -111,7 +111,7 @@ func (r *resourceRepo) Apply(
 	manifest []byte,
 	opts core.ApplyOptions,
 ) (*unstructured.Unstructured, error) {
-	client, err := r.client(ctx, cluster)
+	client, err := r.dynamicClient(ctx, cluster)
 	if err != nil {
 		return nil, err
 	}
@@ -143,7 +143,7 @@ func (r *resourceRepo) Delete(
 	namespace, name string,
 	opts core.DeleteOptions,
 ) error {
-	client, err := r.client(ctx, cluster)
+	client, err := r.dynamicClient(ctx, cluster)
 	if err != nil {
 		return err
 	}
@@ -174,7 +174,7 @@ func (r *resourceRepo) Watch(
 	namespace string,
 	opts core.WatchOptions,
 ) (core.Watcher, error) {
-	client, err := r.client(ctx, cluster)
+	client, err := r.dynamicClient(ctx, cluster)
 	if err != nil {
 		return nil, err
 	}
@@ -306,7 +306,7 @@ func (r *resourceRepo) ListEvents(
 	cluster, namespace string,
 	opts core.ListOptions,
 ) (*unstructured.UnstructuredList, error) {
-	client, err := r.client(ctx, cluster)
+	client, err := r.dynamicClient(ctx, cluster)
 	if err != nil {
 		return nil, err
 	}
@@ -326,19 +326,23 @@ func (r *resourceRepo) ListEvents(
 // Client helpers
 // ---------------------------------------------------------------------------
 
-// client builds a fresh impersonated dynamic client for the given cluster.
+// dynamicClient builds a fresh impersonated dynamic client for the given cluster.
 // A new client is created per request because each request may carry
 // different impersonation credentials (user subject + groups). The
 // underlying HTTP transport (TCP connections) is cached per-cluster in
 // Kubernetes.roundTripper, so the per-request cost is limited to
 // allocating the Go-level client wrapper — negligible compared to the
 // actual API call latency.
-func (r *resourceRepo) client(ctx context.Context, cluster string) (*dynamic.DynamicClient, error) {
+func (r *resourceRepo) dynamicClient(ctx context.Context, cluster string) (*dynamic.DynamicClient, error) {
 	config, err := r.kubernetes.impersonationConfig(ctx, cluster)
 	if err != nil {
 		return nil, err
 	}
-	return dynamic.NewForConfig(config)
+	dc, err := dynamic.NewForConfig(config)
+	if err != nil {
+		return nil, &core.DomainError{Code: core.ErrorCodeInternal, Message: "create dynamic client", Cause: err}
+	}
+	return dc, nil
 }
 
 // fromYAML decodes a YAML manifest into an Unstructured object.

@@ -135,7 +135,10 @@ func (s *RuntimeService) ExecuteTTY(ctx context.Context, req *pb.ExecuteTTYReque
 	var readerWg sync.WaitGroup
 	readerWg.Add(2)
 
-	// Read stdout.
+	// Read stdout. The send to ch is guarded by ctx.Done() so that
+	// the goroutine exits promptly when the stream's context is
+	// cancelled, even if the channel buffer is full and nobody is
+	// draining it anymore.
 	go func() {
 		defer readerWg.Done()
 		defer stdoutR.Close()
@@ -143,7 +146,11 @@ func (s *RuntimeService) ExecuteTTY(ctx context.Context, req *pb.ExecuteTTYReque
 		for {
 			n, readErr := stdoutR.Read(buf)
 			if n > 0 {
-				ch <- execChunk{stdout: append([]byte(nil), buf[:n]...)}
+				select {
+				case ch <- execChunk{stdout: append([]byte(nil), buf[:n]...)}:
+				case <-ctx.Done():
+					return
+				}
 			}
 			if readErr != nil {
 				return
@@ -159,7 +166,11 @@ func (s *RuntimeService) ExecuteTTY(ctx context.Context, req *pb.ExecuteTTYReque
 		for {
 			n, readErr := stderrR.Read(buf)
 			if n > 0 {
-				ch <- execChunk{stderr: append([]byte(nil), buf[:n]...)}
+				select {
+				case ch <- execChunk{stderr: append([]byte(nil), buf[:n]...)}:
+				case <-ctx.Done():
+					return
+				}
 			}
 			if readErr != nil {
 				return
