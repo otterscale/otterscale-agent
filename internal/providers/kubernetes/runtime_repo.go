@@ -194,6 +194,10 @@ func (r *runtimeRepo) Restart(ctx context.Context, cluster string, gvr schema.Gr
 		return err
 	}
 
+	// time.Now is used directly (not injected) because the annotation
+	// value only needs to differ from the previous value to trigger a
+	// rolling update — its exact timestamp is not significant for
+	// correctness or testability.
 	patchData := map[string]any{
 		"spec": map[string]any{
 			"template": map[string]any{
@@ -364,8 +368,12 @@ func (a *sizeQueueAdapter) Next() *remotecommand.TerminalSize {
 // Client helpers
 // ---------------------------------------------------------------------------
 
-// clientset builds an impersonated typed Kubernetes clientset for the
-// given cluster. Uses the pre-cached transport from Kubernetes.
+// clientset builds a fresh impersonated typed Kubernetes clientset for
+// the given cluster. A new clientset is created per request because
+// each request may carry different impersonation credentials (user
+// subject + groups). The underlying HTTP transport is cached
+// per-cluster in Kubernetes.roundTripper, so only the Go-level wrapper
+// is allocated — negligible compared to the actual API call latency.
 func (r *runtimeRepo) clientset(ctx context.Context, cluster string) (*kubernetes.Clientset, error) {
 	config, err := r.kubernetes.impersonationConfig(ctx, cluster)
 	if err != nil {
@@ -378,8 +386,9 @@ func (r *runtimeRepo) clientset(ctx context.Context, cluster string) (*kubernete
 	return cs, nil
 }
 
-// dynamicClient builds an impersonated dynamic client for the given
-// cluster.
+// dynamicClient builds a fresh impersonated dynamic client for the
+// given cluster. See clientset for the rationale on per-request
+// client creation.
 func (r *runtimeRepo) dynamicClient(ctx context.Context, cluster string) (*dynamic.DynamicClient, error) {
 	config, err := r.kubernetes.impersonationConfig(ctx, cluster)
 	if err != nil {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"runtime/debug"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -234,7 +235,10 @@ func (w *watcherAdapter) relay() {
 	defer close(w.ch)
 	defer func() {
 		if r := recover(); r != nil {
-			slog.Error("watch relay panic recovered", "panic", r)
+			slog.Error("watch relay panic recovered",
+				"panic", r,
+				"stack", string(debug.Stack()),
+			)
 		}
 	}()
 
@@ -322,7 +326,13 @@ func (r *resourceRepo) ListEvents(
 // Client helpers
 // ---------------------------------------------------------------------------
 
-// client builds an impersonated dynamic client for the given cluster.
+// client builds a fresh impersonated dynamic client for the given cluster.
+// A new client is created per request because each request may carry
+// different impersonation credentials (user subject + groups). The
+// underlying HTTP transport (TCP connections) is cached per-cluster in
+// Kubernetes.roundTripper, so the per-request cost is limited to
+// allocating the Go-level client wrapper — negligible compared to the
+// actual API call latency.
 func (r *resourceRepo) client(ctx context.Context, cluster string) (*dynamic.DynamicClient, error) {
 	config, err := r.kubernetes.impersonationConfig(ctx, cluster)
 	if err != nil {

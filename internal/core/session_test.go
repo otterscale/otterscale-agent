@@ -88,10 +88,18 @@ func TestSessionStore_ExecCRUD(t *testing.T) {
 		t.Error("expected not to find nonexistent session")
 	}
 
-	store.DeleteExec("exec-1")
+	removed := store.RemoveExec("exec-1")
+	if removed == nil {
+		t.Fatal("expected RemoveExec to return the session")
+	}
 	_, ok = store.GetExec("exec-1")
 	if ok {
-		t.Error("expected session to be deleted")
+		t.Error("expected session to be removed")
+	}
+
+	// RemoveExec on a non-existent session should return nil.
+	if store.RemoveExec("exec-1") != nil {
+		t.Error("expected nil for already-removed session")
 	}
 }
 
@@ -117,10 +125,18 @@ func TestSessionStore_PortForwardCRUD(t *testing.T) {
 		t.Errorf("got ID %q, want %q", got.ID, "pf-1")
 	}
 
-	store.DeletePortForward("pf-1")
+	removed := store.RemovePortForward("pf-1")
+	if removed == nil {
+		t.Fatal("expected RemovePortForward to return the session")
+	}
 	_, ok = store.GetPortForward("pf-1")
 	if ok {
-		t.Error("expected session to be deleted")
+		t.Error("expected session to be removed")
+	}
+
+	// RemovePortForward on a non-existent session should return nil.
+	if store.RemovePortForward("pf-1") != nil {
+		t.Error("expected nil for already-removed session")
 	}
 }
 

@@ -273,8 +273,13 @@ func (s *Server) isPublicPath(path string) bool {
 }
 
 // wrapCORS applies CORS headers. When no origins are configured
-// (agent mode) it allows all origins. In server mode the startup
-// validation in NewServer ensures allowedOrigins is non-empty.
+// (agent mode) it allows all origins. This is safe because the agent
+// serves exclusively on an in-memory pipe listener behind the chisel
+// tunnel — traffic never reaches the agent directly from a browser.
+// All requests are forwarded through the server's mTLS-authenticated
+// tunnel, so browser-origin restrictions are enforced at the server
+// layer instead. In server mode the startup validation in NewServer
+// ensures allowedOrigins is non-empty.
 func (s *Server) wrapCORS(next http.Handler) http.Handler {
 	if len(s.allowedOrigins) == 0 {
 		return cors.AllowAll().Handler(next)

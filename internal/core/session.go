@@ -167,13 +167,6 @@ func (s *SessionStore) GetExec(id string) (*ExecSession, bool) {
 	return sess, ok
 }
 
-// DeleteExec removes an exec session.
-func (s *SessionStore) DeleteExec(id string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	delete(s.execSess, id)
-}
-
 // RemoveExec atomically retrieves and removes an exec session. It
 // returns nil if the session does not exist. This prevents the
 // double-close race between CleanupExec and ReapStaleSessions by
@@ -211,13 +204,6 @@ func (s *SessionStore) GetPortForward(id string) (*PortForwardSession, bool) {
 	defer s.mu.RUnlock()
 	sess, ok := s.pfSess[id]
 	return sess, ok
-}
-
-// DeletePortForward removes a port-forward session.
-func (s *SessionStore) DeletePortForward(id string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	delete(s.pfSess, id)
 }
 
 // RemovePortForward atomically retrieves and removes a port-forward

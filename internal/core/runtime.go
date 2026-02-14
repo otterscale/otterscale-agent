@@ -334,6 +334,19 @@ func (uc *RuntimeUseCase) CleanupPortForward(_ context.Context, sessionID string
 	sess.Writer.Close()
 }
 
+// GetScale validates the inputs, looks up the GVR, and returns the
+// current replica count without modifying it.
+func (uc *RuntimeUseCase) GetScale(ctx context.Context, id ResourceIdentifier) (int32, error) {
+	if id.Name == "" {
+		return 0, &ErrInvalidInput{Field: "name", Message: "resource name is required"}
+	}
+	gvr, err := id.lookupGVR(ctx, uc.discovery)
+	if err != nil {
+		return 0, err
+	}
+	return uc.runtime.GetScale(ctx, id.Cluster, gvr, id.Namespace, id.Name)
+}
+
 // Scale validates the inputs, looks up the GVR, updates the desired
 // replica count, and returns the new value.
 func (uc *RuntimeUseCase) Scale(ctx context.Context, id ResourceIdentifier, replicas int32) (int32, error) {

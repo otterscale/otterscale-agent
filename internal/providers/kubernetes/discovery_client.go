@@ -125,10 +125,12 @@ func (d *discoveryClient) SupportsWatchList(ctx context.Context, cluster string)
 	return kubeVersion.GreaterThanEqual(minWatchListVersion), nil
 }
 
-// client returns a discovery client for the given cluster with
-// impersonation headers set for the calling user. The underlying HTTP
-// transport is shared across users; only the impersonation config
-// differs per request.
+// client returns a fresh discovery client for the given cluster with
+// impersonation headers set for the calling user. A new client is
+// created per request because each request may carry different
+// impersonation credentials (user subject + groups). The underlying
+// HTTP transport is cached per-cluster in Kubernetes.roundTripper, so
+// only the Go-level wrapper is allocated per call.
 func (d *discoveryClient) client(ctx context.Context, cluster string) (*discovery.DiscoveryClient, error) {
 	config, err := d.kubernetes.impersonationConfig(ctx, cluster)
 	if err != nil {
