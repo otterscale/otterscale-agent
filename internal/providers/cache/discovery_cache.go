@@ -12,15 +12,14 @@ import (
 	"time"
 
 	"golang.org/x/sync/singleflight"
-	"k8s.io/apimachinery/pkg/version"
 	"k8s.io/kube-openapi/pkg/validation/spec"
 
 	"github.com/otterscale/otterscale-agent/internal/core"
 )
 
-// DefaultTTL is the default TTL for cached OpenAPI schemas and
-// server versions. Exported so that the DI layer can use it when
-// constructing a DiscoveryCache.
+// DefaultTTL is the default TTL for cached OpenAPI schemas.
+// Exported so that the DI layer can use it when constructing a
+// DiscoveryCache.
 const DefaultTTL = 10 * time.Minute
 
 // defaultMaxSchemaEntries is the upper bound on the number of schema
@@ -28,38 +27,25 @@ const DefaultTTL = 10 * time.Minute
 // before inserting new ones.
 const defaultMaxSchemaEntries = 10000
 
-// defaultMaxVersionEntries is the upper bound on the number of
-// version cache entries.
-const defaultMaxVersionEntries = 1000
-
 // DiscoveryCache provides TTL-based caching with singleflight
-// deduplication for OpenAPI schemas and Kubernetes server versions.
-// It implements core.SchemaResolver and core.CacheEvictor, and
-// reduces redundant discovery API calls when multiple concurrent
-// requests target the same cluster.
+// deduplication for OpenAPI schemas. It implements
+// core.SchemaResolver and core.CacheEvictor, and reduces redundant
+// discovery API calls when multiple concurrent requests target the
+// same cluster.
 type DiscoveryCache struct {
-	discovery         core.DiscoveryClient
-	ttl               time.Duration
-	now               func() time.Time
-	maxSchemaEntries  int
-	maxVersionEntries int
+	discovery        core.DiscoveryClient
+	ttl              time.Duration
+	now              func() time.Time
+	maxSchemaEntries int
 
-	mu             sync.RWMutex
-	schemaCache    map[string]*schemaCacheEntry
-	versionCache   map[string]*versionCacheEntry
-	schemaFlights  singleflight.Group
-	versionFlights singleflight.Group
+	mu            sync.RWMutex
+	schemaCache   map[string]*schemaCacheEntry
+	schemaFlights singleflight.Group
 }
 
 // schemaCacheEntry pairs a cached schema with its expiration time.
 type schemaCacheEntry struct {
 	schema    *spec.Schema
-	expiresAt time.Time
-}
-
-// versionCacheEntry pairs a cached server version with its expiration.
-type versionCacheEntry struct {
-	version   *version.Info
 	expiresAt time.Time
 }
 
@@ -89,27 +75,15 @@ func WithMaxSchemaEntries(n int) Option {
 	}
 }
 
-// WithMaxVersionEntries overrides the default upper bound on cached
-// version entries.
-func WithMaxVersionEntries(n int) Option {
-	return func(c *DiscoveryCache) {
-		if n > 0 {
-			c.maxVersionEntries = n
-		}
-	}
-}
-
 // NewDiscoveryCache returns a DiscoveryCache that wraps the given
 // DiscoveryClient and caches results for the specified TTL.
 func NewDiscoveryCache(discovery core.DiscoveryClient, ttl time.Duration, opts ...Option) *DiscoveryCache {
 	c := &DiscoveryCache{
-		discovery:         discovery,
-		ttl:               ttl,
-		now:               time.Now,
-		maxSchemaEntries:  defaultMaxSchemaEntries,
-		maxVersionEntries: defaultMaxVersionEntries,
-		schemaCache:       make(map[string]*schemaCacheEntry),
-		versionCache:      make(map[string]*versionCacheEntry),
+		discovery:        discovery,
+		ttl:              ttl,
+		now:              time.Now,
+		maxSchemaEntries: defaultMaxSchemaEntries,
+		schemaCache:      make(map[string]*schemaCacheEntry),
 	}
 	for _, o := range opts {
 		o(c)
@@ -152,9 +126,13 @@ func (c *DiscoveryCache) ResolveSchema(
 		if len(c.schemaCache) >= c.maxSchemaEntries {
 			c.evictExpiredSchemas()
 		}
-		c.schemaCache[key] = &schemaCacheEntry{
-			schema:    resolved,
-			expiresAt: c.now().Add(c.ttl),
+		// Only cache if eviction freed enough space; otherwise
+		// return the result uncached to prevent unbounded growth.
+		if len(c.schemaCache) < c.maxSchemaEntries {
+			c.schemaCache[key] = &schemaCacheEntry{
+				schema:    resolved,
+				expiresAt: c.now().Add(c.ttl),
+			}
 		}
 		c.mu.Unlock()
 
@@ -165,48 +143,6 @@ func (c *DiscoveryCache) ResolveSchema(
 	}
 
 	return v.(*spec.Schema), nil
-}
-
-// ServerVersion returns the cached Kubernetes version for the given
-// cluster. Results are cached for the configured TTL and concurrent
-// requests are deduplicated via singleflight.
-func (c *DiscoveryCache) ServerVersion(ctx context.Context, cluster string) (*version.Info, error) {
-	c.mu.RLock()
-	entry, ok := c.versionCache[cluster]
-	c.mu.RUnlock()
-
-	if ok && c.now().Before(entry.expiresAt) {
-		return entry.version, nil
-	}
-
-	v, err, _ := c.versionFlights.Do(cluster, func() (any, error) {
-		fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), singleflightFetchTimeout)
-		defer cancel()
-
-		info, err := c.discovery.ServerVersion(fetchCtx, cluster)
-		if err != nil {
-			return nil, err
-		}
-
-		c.mu.Lock()
-		// Enforce size limit: eagerly evict expired entries before
-		// inserting a new one to stay within the bound.
-		if len(c.versionCache) >= c.maxVersionEntries {
-			c.evictExpiredVersions()
-		}
-		c.versionCache[cluster] = &versionCacheEntry{
-			version:   info,
-			expiresAt: c.now().Add(c.ttl),
-		}
-		c.mu.Unlock()
-
-		return info, nil
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	return v.(*version.Info), nil
 }
 
 // schemaCacheKey builds a cache key from the cluster/group/version/kind tuple.
@@ -229,10 +165,9 @@ func (c *DiscoveryCache) StartEvictionLoop(ctx context.Context, interval time.Du
 			return
 		case <-ticker.C:
 			c.mu.Lock()
-			before := len(c.schemaCache) + len(c.versionCache)
+			before := len(c.schemaCache)
 			c.evictExpiredSchemas()
-			c.evictExpiredVersions()
-			after := len(c.schemaCache) + len(c.versionCache)
+			after := len(c.schemaCache)
 			c.mu.Unlock()
 
 			if evicted := before - after; evicted > 0 {
@@ -249,17 +184,6 @@ func (c *DiscoveryCache) evictExpiredSchemas() {
 	for key, entry := range c.schemaCache {
 		if now.After(entry.expiresAt) {
 			delete(c.schemaCache, key)
-		}
-	}
-}
-
-// evictExpiredVersions removes expired entries from the version cache.
-// Must be called with mu held for writing.
-func (c *DiscoveryCache) evictExpiredVersions() {
-	now := c.now()
-	for key, entry := range c.versionCache {
-		if now.After(entry.expiresAt) {
-			delete(c.versionCache, key)
 		}
 	}
 }
