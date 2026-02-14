@@ -2,8 +2,8 @@ VERSION=$(shell git describe --tags --always)
 PROTO_FILES=$(shell find api -name *.proto -not -path api/api.proto)
 TEST_FILES=$(shell go list ./... | grep -v /api/)
 
-FLUXCD_VERSION := v2.4.0
-OTTERSCALE_OPERATOR_VERSION := v0.1.0
+FLUX2_VERSION := v2.4.0
+OTTERSCALE_OPERATOR_VERSION := v0.2.6
 
 BOOTSTRAP_DIR := manifests/bootstrap
 
@@ -48,12 +48,12 @@ openapi:
 
 .PHONY: bootstrap-manifests
 # download bootstrap manifests (FluxCD + otterscale-operator)
-bootstrap-manifests: $(BOOTSTRAP_DIR)/fluxcd.yaml $(BOOTSTRAP_DIR)/otterscale-operator.yaml
+bootstrap-manifests: $(BOOTSTRAP_DIR)/flux2.yaml $(BOOTSTRAP_DIR)/otterscale-operator.yaml
 
-$(BOOTSTRAP_DIR)/fluxcd.yaml:
+$(BOOTSTRAP_DIR)/flux2.yaml:
 	@mkdir -p $(BOOTSTRAP_DIR)
 	curl -sSL -o $@ \
-	  https://github.com/fluxcd/flux2/releases/download/$(FLUXCD_VERSION)/install.yaml
+	  https://github.com/fluxcd/flux2/releases/download/$(FLUX2_VERSION)/install.yaml
 
 $(BOOTSTRAP_DIR)/otterscale-operator.yaml:
 	@mkdir -p $(BOOTSTRAP_DIR)
@@ -63,7 +63,7 @@ $(BOOTSTRAP_DIR)/otterscale-operator.yaml:
 .PHONY: update-bootstrap
 # force re-download all bootstrap manifests
 update-bootstrap:
-	@rm -f $(BOOTSTRAP_DIR)/fluxcd.yaml $(BOOTSTRAP_DIR)/otterscale-operator.yaml
+	@rm -f $(BOOTSTRAP_DIR)/flux2.yaml $(BOOTSTRAP_DIR)/otterscale-operator.yaml
 	$(MAKE) bootstrap-manifests
 
 .PHONY: help
