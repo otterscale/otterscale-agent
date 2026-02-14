@@ -5,15 +5,10 @@ package core
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"regexp"
 	"strings"
-	"time"
 )
 
 // maxClusterNameLength is the maximum allowed length for a cluster
@@ -111,11 +106,6 @@ type Cluster struct {
 	AgentVersion string // agent binary version
 }
 
-// manifestTokenTTL is the validity period of HMAC-signed manifest
-// tokens. After this duration the token expires and a new one must
-// be issued via the GetAgentManifest RPC.
-const manifestTokenTTL = 1 * time.Hour
-
 // AgentManifestConfig holds the external URLs and HMAC key needed to
 // generate agent installation manifests and sign manifest tokens.
 type AgentManifestConfig struct {
@@ -149,12 +139,14 @@ type ManifestRenderer interface {
 }
 
 // FleetUseCase orchestrates cluster registration on the server side.
-// It delegates CSR signing and tunnel setup to the TunnelProvider.
+// It delegates CSR signing and tunnel setup to the TunnelProvider,
+// and token management to the ManifestTokenIssuer.
 type FleetUseCase struct {
 	tunnel      TunnelProvider
 	version     Version
 	manifestCfg AgentManifestConfig
 	renderer    ManifestRenderer
+	tokenIssuer *ManifestTokenIssuer
 }
 
 // NewFleetUseCase returns a FleetUseCase backed by the given
@@ -170,14 +162,16 @@ func NewFleetUseCase(tunnel TunnelProvider, version Version, manifestCfg AgentMa
 	if manifestCfg.TunnelURL == "" {
 		return nil, fmt.Errorf("manifest config: tunnel URL is required")
 	}
-	if len(manifestCfg.HMACKey) == 0 {
-		return nil, fmt.Errorf("manifest config: HMAC key is required")
+	tokenIssuer, err := NewManifestTokenIssuer(manifestCfg.HMACKey)
+	if err != nil {
+		return nil, err
 	}
 	return &FleetUseCase{
 		tunnel:      tunnel,
 		version:     version,
 		manifestCfg: manifestCfg,
 		renderer:    renderer,
+		tokenIssuer: tokenIssuer,
 	}, nil
 }
 
@@ -217,18 +211,12 @@ func (uc *FleetUseCase) RegisterCluster(ctx context.Context, cluster, agentID, a
 // the agent manifest as raw YAML. The token is valid for
 // manifestTokenTTL.
 func (uc *FleetUseCase) IssueManifestURL(_ context.Context, cluster, userName string) (string, error) {
-	token, err := uc.issueManifestToken(cluster, userName)
+	token, err := uc.tokenIssuer.Issue(cluster, userName)
 	if err != nil {
 		return "", fmt.Errorf("issue manifest token: %w", err)
 	}
 	return strings.TrimRight(uc.manifestCfg.ServerURL, "/") + "/fleet/manifest/" + token, nil
 }
-
-// errInvalidToken is the generic error returned for all token
-// verification failures. Using a single message prevents attackers
-// from inferring the verification stage that failed (e.g. decode vs
-// signature vs expiry).
-var errInvalidToken = fmt.Errorf("invalid or expired token")
 
 // VerifyManifestToken validates the HMAC signature and expiry of a
 // manifest token and returns the embedded cluster name and user
@@ -236,97 +224,12 @@ var errInvalidToken = fmt.Errorf("invalid or expired token")
 // avoid leaking which stage failed; detailed reasons are logged at
 // debug level.
 func (uc *FleetUseCase) VerifyManifestToken(_ context.Context, token string) (cluster, userName string, err error) {
-	cluster, userName, err = uc.verifyManifestTokenInternal(token)
+	cluster, userName, err = uc.tokenIssuer.Verify(token)
 	if err != nil {
 		slog.Debug("manifest token verification failed", "error", err)
-		return "", "", errInvalidToken
+		return "", "", err
 	}
 	return cluster, userName, nil
-}
-
-// verifyManifestTokenInternal performs the actual token verification
-// with detailed error messages for logging. The caller wraps failures
-// into a generic error before returning to the transport layer.
-func (uc *FleetUseCase) verifyManifestTokenInternal(token string) (cluster, userName string, err error) {
-	parts := strings.SplitN(token, ".", 2)
-	if len(parts) != 2 {
-		return "", "", fmt.Errorf("malformed token")
-	}
-
-	payloadBytes, err := base64.RawURLEncoding.DecodeString(parts[0])
-	if err != nil {
-		return "", "", fmt.Errorf("decode payload: %w", err)
-	}
-
-	sig, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return "", "", fmt.Errorf("decode signature: %w", err)
-	}
-
-	// Verify HMAC before trusting any payload content.
-	mac := hmac.New(sha256.New, uc.manifestCfg.HMACKey)
-	mac.Write(payloadBytes)
-	if !hmac.Equal(sig, mac.Sum(nil)) {
-		return "", "", fmt.Errorf("invalid token signature")
-	}
-
-	var claims manifestTokenClaims
-	if err := json.Unmarshal(payloadBytes, &claims); err != nil {
-		return "", "", fmt.Errorf("parse token claims: %w", err)
-	}
-
-	now := time.Now().Unix()
-
-	if now > claims.Exp {
-		return "", "", fmt.Errorf("token expired")
-	}
-
-	// Sanity-check iat: reject tokens that claim to be issued in
-	// the future (clock skew allowance: 5 minutes) or that are
-	// older than the maximum token TTL plus a small buffer. This
-	// limits the replay window for leaked tokens.
-	const clockSkew = 5 * 60 // 5 minutes in seconds
-	maxAge := int64(manifestTokenTTL.Seconds()) + clockSkew
-	if claims.Iat > now+clockSkew {
-		return "", "", fmt.Errorf("token issued in the future")
-	}
-	if now-claims.Iat > maxAge {
-		return "", "", fmt.Errorf("token too old")
-	}
-
-	return claims.Cluster, claims.Sub, nil
-}
-
-// issueManifestToken creates a signed token containing the user
-// identity, cluster name, issued-at, and expiry timestamps.
-func (uc *FleetUseCase) issueManifestToken(cluster, userName string) (string, error) {
-	now := time.Now()
-	claims := manifestTokenClaims{
-		Sub:     userName,
-		Cluster: cluster,
-		Iat:     now.Unix(),
-		Exp:     now.Add(manifestTokenTTL).Unix(),
-	}
-
-	payload, err := json.Marshal(claims)
-	if err != nil {
-		return "", fmt.Errorf("marshal token claims: %w", err)
-	}
-
-	mac := hmac.New(sha256.New, uc.manifestCfg.HMACKey)
-	mac.Write(payload)
-	sig := mac.Sum(nil)
-
-	return base64.RawURLEncoding.EncodeToString(payload) + "." +
-		base64.RawURLEncoding.EncodeToString(sig), nil
-}
-
-// manifestTokenClaims is the JSON payload embedded in manifest tokens.
-type manifestTokenClaims struct {
-	Sub     string `json:"sub"`
-	Cluster string `json:"cluster"`
-	Iat     int64  `json:"iat"`
-	Exp     int64  `json:"exp"`
 }
 
 // GenerateAgentManifest produces a multi-document YAML manifest for

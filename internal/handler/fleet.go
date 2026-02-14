@@ -75,12 +75,12 @@ func (s *FleetService) GetAgentManifest(ctx context.Context, req *pb.GetAgentMan
 
 	manifest, err := s.fleet.GenerateAgentManifest(ctx, cluster, userInfo.Subject)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+		return nil, domainErrorToConnectError(err)
 	}
 
 	url, err := s.fleet.IssueManifestURL(ctx, cluster, userInfo.Subject)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, domainErrorToConnectError(err)
 	}
 
 	resp := &pb.GetAgentManifestResponse{}

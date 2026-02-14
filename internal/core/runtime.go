@@ -171,20 +171,48 @@ func (uc *RuntimeUseCase) StartExec(ctx context.Context, params StartExecParams)
 		})
 	}()
 
-	uc.sessions.PutExec(sess)
+	if err := uc.sessions.PutExec(sess); err != nil {
+		cancel()
+		stdinW.Close()
+		stdoutW.Close()
+		stderrW.Close()
+		sizeQueue.Close()
+		return nil, nil, nil, err
+	}
 	return sess, stdoutR, stderrR, nil
 }
 
-// WriteExec writes stdin data to an active exec session. The context
-// is accepted so that callers can cancel blocking pipe writes during
-// graceful shutdown.
-func (uc *RuntimeUseCase) WriteExec(_ context.Context, sessionID string, data []byte) error {
+// WriteExec writes stdin data to an active exec session. The write is
+// performed in a background goroutine so that the caller's context can
+// cancel a blocking pipe write during graceful shutdown or if the exec
+// session has already finished.
+func (uc *RuntimeUseCase) WriteExec(ctx context.Context, sessionID string, data []byte) error {
 	sess, ok := uc.sessions.GetExec(sessionID)
 	if !ok {
 		return &ErrSessionNotFound{Resource: "exec-session", ID: sessionID}
 	}
-	_, err := sess.Stdin.Write(data)
-	return err
+
+	// Fast-path: if the session goroutine has already exited, the
+	// pipe reader is closed and Write would return immediately with
+	// an error. Check Done first to return a clearer error.
+	select {
+	case <-sess.Done:
+		return &ErrSessionNotFound{Resource: "exec-session", ID: sessionID}
+	default:
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := sess.Stdin.Write(data)
+		errCh <- err
+	}()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case err := <-errCh:
+		return err
+	}
 }
 
 // ResizeExec sends a terminal resize event to an active exec session.
@@ -242,18 +270,45 @@ func (uc *RuntimeUseCase) StartPortForward(ctx context.Context, cluster, namespa
 		})
 	}()
 
-	uc.sessions.PutPortForward(sess)
+	if err := uc.sessions.PutPortForward(sess); err != nil {
+		cancel()
+		dataInW.Close()
+		dataOutW.Close()
+		return nil, nil, err
+	}
 	return sess, dataOutR, nil
 }
 
-// WritePortForward writes data to an active port-forward session.
-func (uc *RuntimeUseCase) WritePortForward(_ context.Context, sessionID string, data []byte) error {
+// WritePortForward writes data to an active port-forward session. The
+// write is performed in a background goroutine so that the caller's
+// context can cancel a blocking pipe write during graceful shutdown.
+func (uc *RuntimeUseCase) WritePortForward(ctx context.Context, sessionID string, data []byte) error {
 	sess, ok := uc.sessions.GetPortForward(sessionID)
 	if !ok {
 		return &ErrSessionNotFound{Resource: "portforward-session", ID: sessionID}
 	}
-	_, err := sess.Writer.Write(data)
-	return err
+
+	// Fast-path: if the session goroutine has already exited, the
+	// pipe reader is closed and Write would return immediately with
+	// an error. Check Done first to return a clearer error.
+	select {
+	case <-sess.Done:
+		return &ErrSessionNotFound{Resource: "portforward-session", ID: sessionID}
+	default:
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := sess.Writer.Write(data)
+		errCh <- err
+	}()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case err := <-errCh:
+		return err
+	}
 }
 
 // CleanupPortForward stops a port-forward session and removes it from

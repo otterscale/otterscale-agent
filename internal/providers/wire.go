@@ -14,10 +14,10 @@ import (
 	"github.com/otterscale/otterscale-agent/internal/transport"
 )
 
-// provideDiscoveryCache constructs a DiscoveryCache with the default TTL.
+// ProvideDiscoveryCache constructs a DiscoveryCache with the default TTL.
 // This bridges the core.DiscoveryClient to the core.SchemaResolver
 // interface via caching.
-func provideDiscoveryCache(discovery core.DiscoveryClient) *cache.DiscoveryCache {
+func ProvideDiscoveryCache(discovery core.DiscoveryClient) *cache.DiscoveryCache {
 	return cache.NewDiscoveryCache(discovery, cache.DefaultTTL)
 }
 
@@ -33,6 +33,6 @@ var ProviderSet = wire.NewSet(
 	kubernetes.NewResourceRepo,
 	kubernetes.NewRuntimeRepo,
 	otterscale.NewFleetRegistrar,
-	provideDiscoveryCache,
+	ProvideDiscoveryCache,
 	wire.Bind(new(core.SchemaResolver), new(*cache.DiscoveryCache)),
 )

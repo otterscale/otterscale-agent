@@ -11,15 +11,11 @@ package main
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 
 	"github.com/spf13/cobra"
-	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/otterscale/otterscale-agent/internal/cmd"
 	"github.com/otterscale/otterscale-agent/internal/cmd/agent"
@@ -91,110 +87,9 @@ func newCmd(conf *config.Config) (*cobra.Command, error) {
 	return c, nil
 }
 
-// provideCA is a Wire provider that loads the CA from the configured
-// directory. On first startup the directory is empty, so a new CA is
-// generated (using crypto/rand backed by a FIPS-approved DRBG) and
-// persisted. Subsequent restarts load the existing CA, keeping
-// previously issued agent certificates valid.
+// provideCA is a thin Wire provider that extracts the CA directory
+// from the config and delegates to pki.ProvideCA for the actual
+// CA loading/generation logic.
 func provideCA(conf *config.Config) (*pki.CA, error) {
-	dir := conf.ServerTunnelCADir()
-	certPath := filepath.Join(dir, "ca.pem")
-	keyPath := filepath.Join(dir, "ca-key.pem")
-
-	certPEM, errC := os.ReadFile(certPath)
-	keyPEM, errK := os.ReadFile(keyPath)
-	if errC == nil && errK == nil {
-		slog.Info("loading existing CA", "dir", dir)
-		return pki.LoadCA(certPEM, keyPEM)
-	}
-
-	// First run: generate and persist.
-	slog.Info("generating new CA", "dir", dir)
-	ca, err := pki.NewCA()
-	if err != nil {
-		return nil, fmt.Errorf("generate CA: %w", err)
-	}
-
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		return nil, fmt.Errorf("create CA dir: %w", err)
-	}
-
-	keyPEM, err = ca.KeyPEM()
-	if err != nil {
-		return nil, fmt.Errorf("export CA key: %w", err)
-	}
-
-	// Write cert and key atomically (write to temp + rename) so
-	// that a crash between the two writes does not leave a
-	// half-written CA state on disk.
-	if err := atomicWriteFile(certPath, ca.CertPEM(), 0600); err != nil {
-		return nil, fmt.Errorf("write CA cert: %w", err)
-	}
-	if err := atomicWriteFile(keyPath, keyPEM, 0600); err != nil {
-		return nil, fmt.Errorf("write CA key: %w", err)
-	}
-
-	return ca, nil
-}
-
-// atomicWriteFile writes data to a temporary file in the same
-// directory as path, then renames it into place. This ensures that
-// the target file is either fully written or not present — a crash
-// mid-write cannot leave a partially written file at path.
-func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
-	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".tmp.*")
-	if err != nil {
-		return fmt.Errorf("create temp file: %w", err)
-	}
-	tmpPath := tmp.Name()
-
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		os.Remove(tmpPath)
-		return fmt.Errorf("write temp file: %w", err)
-	}
-	if err := tmp.Chmod(perm); err != nil {
-		tmp.Close()
-		os.Remove(tmpPath)
-		return fmt.Errorf("chmod temp file: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		os.Remove(tmpPath)
-		return fmt.Errorf("close temp file: %w", err)
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		os.Remove(tmpPath)
-		return fmt.Errorf("rename temp file: %w", err)
-	}
-	return nil
-}
-
-// provideInClusterConfig is a Wire provider that returns a
-// *rest.Config for in-cluster Kubernetes API access. It falls back to
-// the user's kubeconfig for local development.
-func provideInClusterConfig() (*rest.Config, error) {
-	cfg, err := rest.InClusterConfig()
-	if err != nil {
-		slog.Warn("in-cluster config not available, falling back to kubeconfig", "error", err)
-		return clientcmd.BuildConfigFromFlags("", clientcmd.RecommendedHomeFile)
-	}
-	return cfg, nil
-}
-
-// provideAgentManifestConfig is a Wire provider that extracts the
-// external URLs from the server configuration and derives an HMAC key
-// for signing stateless manifest tokens. The HMAC key is derived from
-// the CA's private key via HKDF, so it is deterministic for the same
-// CA and survives restarts without separate persistence.
-func provideAgentManifestConfig(conf *config.Config, ca *pki.CA) (core.AgentManifestConfig, error) {
-	hmacKey, err := ca.DeriveHMACKey("manifest-token")
-	if err != nil {
-		return core.AgentManifestConfig{}, fmt.Errorf("derive HMAC key: %w", err)
-	}
-	return core.AgentManifestConfig{
-		ServerURL: conf.ServerExternalURL(),
-		TunnelURL: conf.ServerExternalTunnelURL(),
-		HMACKey:   hmacKey,
-	}, nil
+	return pki.ProvideCA(conf.ServerTunnelCADir())
 }

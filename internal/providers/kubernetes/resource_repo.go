@@ -205,14 +205,12 @@ func (r *resourceRepo) Watch(
 type watcherAdapter struct {
 	inner watch.Interface
 	ch    chan core.WatchEvent
-	done  chan struct{}
 }
 
 func newWatcherAdapter(inner watch.Interface) *watcherAdapter {
 	w := &watcherAdapter{
 		inner: inner,
 		ch:    make(chan core.WatchEvent),
-		done:  make(chan struct{}),
 	}
 	go w.relay()
 	return w

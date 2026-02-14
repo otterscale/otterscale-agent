@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"sync"
@@ -119,6 +120,15 @@ type PortForwardSession struct {
 // Session store
 // ---------------------------------------------------------------------------
 
+// maxExecSessions is the maximum number of concurrent exec sessions
+// allowed. This prevents resource exhaustion from misbehaving or
+// malicious clients that create sessions without cleaning them up.
+const maxExecSessions = 100
+
+// maxPortForwardSessions is the maximum number of concurrent
+// port-forward sessions allowed.
+const maxPortForwardSessions = 100
+
 // SessionStore manages active exec and port-forward sessions.
 type SessionStore struct {
 	mu       sync.RWMutex
@@ -134,11 +144,19 @@ func NewSessionStore() *SessionStore {
 	}
 }
 
-// PutExec stores an exec session.
-func (s *SessionStore) PutExec(sess *ExecSession) {
+// PutExec stores an exec session. It returns an error if the maximum
+// number of concurrent exec sessions has been reached.
+func (s *SessionStore) PutExec(sess *ExecSession) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if len(s.execSess) >= maxExecSessions {
+		return &DomainError{
+			Code:    ErrorCodeResourceExhausted,
+			Message: fmt.Sprintf("max concurrent exec sessions (%d) reached", maxExecSessions),
+		}
+	}
 	s.execSess[sess.ID] = sess
+	return nil
 }
 
 // GetExec retrieves an exec session by ID.
@@ -156,11 +174,20 @@ func (s *SessionStore) DeleteExec(id string) {
 	delete(s.execSess, id)
 }
 
-// PutPortForward stores a port-forward session.
-func (s *SessionStore) PutPortForward(sess *PortForwardSession) {
+// PutPortForward stores a port-forward session. It returns an error
+// if the maximum number of concurrent port-forward sessions has been
+// reached.
+func (s *SessionStore) PutPortForward(sess *PortForwardSession) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if len(s.pfSess) >= maxPortForwardSessions {
+		return &DomainError{
+			Code:    ErrorCodeResourceExhausted,
+			Message: fmt.Sprintf("max concurrent port-forward sessions (%d) reached", maxPortForwardSessions),
+		}
+	}
 	s.pfSess[sess.ID] = sess
+	return nil
 }
 
 // GetPortForward retrieves a port-forward session by ID.

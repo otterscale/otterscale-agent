@@ -13,7 +13,7 @@ import (
 	"github.com/otterscale/otterscale-agent/internal/config"
 	"github.com/otterscale/otterscale-agent/internal/core"
 	"github.com/otterscale/otterscale-agent/internal/handler"
-	"github.com/otterscale/otterscale-agent/internal/providers/cache"
+	"github.com/otterscale/otterscale-agent/internal/providers"
 	"github.com/otterscale/otterscale-agent/internal/providers/chisel"
 	"github.com/otterscale/otterscale-agent/internal/providers/kubernetes"
 	"github.com/otterscale/otterscale-agent/internal/providers/manifest"
@@ -48,7 +48,7 @@ func wireServer(v core.Version, conf *config.Config) (*server.Server, func(), er
 		return nil, nil, err
 	}
 	service := chisel.NewService(ca)
-	agentManifestConfig, err := provideAgentManifestConfig(conf, ca)
+	agentManifestConfig, err := manifest.ProvideAgentManifestConfig(conf, ca)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -60,16 +60,16 @@ func wireServer(v core.Version, conf *config.Config) (*server.Server, func(), er
 	fleetService := handler.NewFleetService(fleetUseCase)
 	kubernetesKubernetes := kubernetes.New(service)
 	discoveryClient := kubernetes.NewDiscoveryClient(kubernetesKubernetes)
-	discoveryCache := cache.NewDiscoveryCache(discoveryClient, cache.DefaultTTL)
 	resourceRepo := kubernetes.NewResourceRepo(kubernetesKubernetes)
+	discoveryCache := providers.ProvideDiscoveryCache(discoveryClient)
 	resourceUseCase := core.NewResourceUseCase(discoveryClient, resourceRepo, discoveryCache)
 	resourceService := handler.NewResourceService(resourceUseCase)
 	runtimeRepo := kubernetes.NewRuntimeRepo(kubernetesKubernetes)
 	sessionStore := core.NewSessionStore()
 	runtimeUseCase := core.NewRuntimeUseCase(discoveryClient, runtimeRepo, sessionStore)
 	runtimeService := handler.NewRuntimeService(runtimeUseCase)
-	handler := server.NewHandler(fleetService, resourceService, runtimeService)
-	serverServer := server.NewServer(handler, service, runtimeUseCase, discoveryCache)
+	serverHandler := server.NewHandler(fleetService, resourceService, runtimeService)
+	serverServer := server.NewServer(serverHandler, service, runtimeUseCase, discoveryCache)
 	return serverServer, func() {
 	}, nil
 }
@@ -78,11 +78,11 @@ func wireServer(v core.Version, conf *config.Config) (*server.Server, func(), er
 // registrar, and bootstrapper. The version parameter is provided by
 // the caller and flows through Wire to both FleetRegistrar and Agent.
 func wireAgent(v core.Version) (*agent.Agent, func(), error) {
-	restConfig, err := provideInClusterConfig()
+	restConfig, err := kubernetes.ProvideInClusterConfig()
 	if err != nil {
 		return nil, nil, err
 	}
-	handler := agent.NewHandler(restConfig)
+	agentHandler := agent.NewHandler(restConfig)
 	tunnelConsumer, err := otterscale.NewFleetRegistrar(v)
 	if err != nil {
 		return nil, nil, err
@@ -92,7 +92,7 @@ func wireAgent(v core.Version) (*agent.Agent, func(), error) {
 		return nil, nil, err
 	}
 	selfUpdater := agent.NewUpdater(restConfig)
-	agentAgent := agent.NewAgent(restConfig, handler, tunnelConsumer, v, bootstrapper, selfUpdater)
+	agentAgent := agent.NewAgent(restConfig, agentHandler, tunnelConsumer, v, bootstrapper, selfUpdater)
 	return agentAgent, func() {
 	}, nil
 }

@@ -301,5 +301,3 @@ func (uc *ResourceUseCase) WatchResource(
 	opts.SendInitialEvents = watchList
 	return uc.resource.Watch(ctx, cluster, gvr, namespace, opts)
 }
-
-

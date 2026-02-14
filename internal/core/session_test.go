@@ -71,7 +71,9 @@ func TestSessionStore_ExecCRUD(t *testing.T) {
 		Done: done,
 	}
 
-	store.PutExec(sess)
+	if err := store.PutExec(sess); err != nil {
+		t.Fatalf("PutExec: %v", err)
+	}
 
 	got, ok := store.GetExec("exec-1")
 	if !ok {
@@ -103,7 +105,9 @@ func TestSessionStore_PortForwardCRUD(t *testing.T) {
 		Done: done,
 	}
 
-	store.PutPortForward(sess)
+	if err := store.PutPortForward(sess); err != nil {
+		t.Fatalf("PutPortForward: %v", err)
+	}
 
 	got, ok := store.GetPortForward("pf-1")
 	if !ok {
@@ -128,33 +132,39 @@ func TestSessionStore_ReapStaleSessions(t *testing.T) {
 	execDone <- nil
 	close(execDone)
 
-	store.PutExec(&ExecSession{
+	if err := store.PutExec(&ExecSession{
 		ID:     "stale-exec",
 		Done:   execDone,
 		Cancel: func() {},
 		Stdin:  &nopCloser{},
-	})
+	}); err != nil {
+		t.Fatalf("PutExec stale: %v", err)
+	}
 
 	// Create a "live" exec session (Done has no value yet).
 	liveDone := make(chan error, 1)
-	store.PutExec(&ExecSession{
+	if err := store.PutExec(&ExecSession{
 		ID:     "live-exec",
 		Done:   liveDone,
 		Cancel: func() {},
 		Stdin:  &nopCloser{},
-	})
+	}); err != nil {
+		t.Fatalf("PutExec live: %v", err)
+	}
 
 	// Create a "stale" port-forward session.
 	pfDone := make(chan error, 1)
 	pfDone <- nil
 	close(pfDone)
 
-	store.PutPortForward(&PortForwardSession{
+	if err := store.PutPortForward(&PortForwardSession{
 		ID:     "stale-pf",
 		Done:   pfDone,
 		Cancel: func() {},
 		Writer: &nopCloser{},
-	})
+	}); err != nil {
+		t.Fatalf("PutPortForward stale: %v", err)
+	}
 
 	reaped := store.ReapStaleSessions()
 	if reaped != 2 {
