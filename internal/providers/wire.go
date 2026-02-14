@@ -35,4 +35,5 @@ var ProviderSet = wire.NewSet(
 	otterscale.NewFleetRegistrar,
 	ProvideDiscoveryCache,
 	wire.Bind(new(core.SchemaResolver), new(*cache.DiscoveryCache)),
+	wire.Bind(new(core.CacheEvictor), new(*cache.DiscoveryCache)),
 )

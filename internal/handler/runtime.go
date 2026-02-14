@@ -294,12 +294,14 @@ func (s *RuntimeService) WritePortForward(ctx context.Context, req *pb.WritePort
 func (s *RuntimeService) Scale(ctx context.Context, req *pb.ScaleRequest) (*pb.ScaleResponse, error) {
 	replicas, err := s.runtime.Scale(
 		ctx,
-		req.GetCluster(),
-		req.GetGroup(),
-		req.GetVersion(),
-		req.GetResource(),
-		req.GetNamespace(),
-		req.GetName(),
+		core.ResourceIdentifier{
+			Cluster:   req.GetCluster(),
+			Group:     req.GetGroup(),
+			Version:   req.GetVersion(),
+			Resource:  req.GetResource(),
+			Namespace: req.GetNamespace(),
+			Name:      req.GetName(),
+		},
 		req.GetReplicas(),
 	)
 	if err != nil {
@@ -319,12 +321,14 @@ func (s *RuntimeService) Scale(ctx context.Context, req *pb.ScaleRequest) (*pb.S
 func (s *RuntimeService) Restart(ctx context.Context, req *pb.RestartRequest) (*emptypb.Empty, error) {
 	if err := s.runtime.Restart(
 		ctx,
-		req.GetCluster(),
-		req.GetGroup(),
-		req.GetVersion(),
-		req.GetResource(),
-		req.GetNamespace(),
-		req.GetName(),
+		core.ResourceIdentifier{
+			Cluster:   req.GetCluster(),
+			Group:     req.GetGroup(),
+			Version:   req.GetVersion(),
+			Resource:  req.GetResource(),
+			Namespace: req.GetNamespace(),
+			Name:      req.GetName(),
+		},
 	); err != nil {
 		return nil, domainErrorToConnectError(err)
 	}

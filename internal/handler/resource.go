@@ -90,11 +90,13 @@ func (s *ResourceService) Schema(ctx context.Context, req *pb.SchemaRequest) (*s
 func (s *ResourceService) List(ctx context.Context, req *pb.ListRequest) (*pb.ListResponse, error) {
 	resources, err := s.resource.ListResources(
 		ctx,
-		req.GetCluster(),
-		req.GetGroup(),
-		req.GetVersion(),
-		req.GetResource(),
-		req.GetNamespace(),
+		core.ResourceIdentifier{
+			Cluster:   req.GetCluster(),
+			Group:     req.GetGroup(),
+			Version:   req.GetVersion(),
+			Resource:  req.GetResource(),
+			Namespace: req.GetNamespace(),
+		},
 		core.ListOptions{
 			LabelSelector: req.GetLabelSelector(),
 			FieldSelector: req.GetFieldSelector(),
@@ -130,12 +132,14 @@ func (s *ResourceService) List(ctx context.Context, req *pb.ListRequest) (*pb.Li
 func (s *ResourceService) Get(ctx context.Context, req *pb.GetRequest) (*pb.Resource, error) {
 	resource, err := s.resource.GetResource(
 		ctx,
-		req.GetCluster(),
-		req.GetGroup(),
-		req.GetVersion(),
-		req.GetResource(),
-		req.GetNamespace(),
-		req.GetName(),
+		core.ResourceIdentifier{
+			Cluster:   req.GetCluster(),
+			Group:     req.GetGroup(),
+			Version:   req.GetVersion(),
+			Resource:  req.GetResource(),
+			Namespace: req.GetNamespace(),
+			Name:      req.GetName(),
+		},
 	)
 	if err != nil {
 		return nil, domainErrorToConnectError(err)
@@ -151,11 +155,13 @@ func (s *ResourceService) Get(ctx context.Context, req *pb.GetRequest) (*pb.Reso
 func (s *ResourceService) Create(ctx context.Context, req *pb.CreateRequest) (*pb.Resource, error) {
 	resource, err := s.resource.CreateResource(
 		ctx,
-		req.GetCluster(),
-		req.GetGroup(),
-		req.GetVersion(),
-		req.GetResource(),
-		req.GetNamespace(),
+		core.ResourceIdentifier{
+			Cluster:   req.GetCluster(),
+			Group:     req.GetGroup(),
+			Version:   req.GetVersion(),
+			Resource:  req.GetResource(),
+			Namespace: req.GetNamespace(),
+		},
 		req.GetManifest(),
 	)
 	if err != nil {
@@ -172,12 +178,14 @@ func (s *ResourceService) Create(ctx context.Context, req *pb.CreateRequest) (*p
 func (s *ResourceService) Apply(ctx context.Context, req *pb.ApplyRequest) (*pb.Resource, error) {
 	resource, err := s.resource.ApplyResource(
 		ctx,
-		req.GetCluster(),
-		req.GetGroup(),
-		req.GetVersion(),
-		req.GetResource(),
-		req.GetNamespace(),
-		req.GetName(),
+		core.ResourceIdentifier{
+			Cluster:   req.GetCluster(),
+			Group:     req.GetGroup(),
+			Version:   req.GetVersion(),
+			Resource:  req.GetResource(),
+			Namespace: req.GetNamespace(),
+			Name:      req.GetName(),
+		},
 		req.GetManifest(),
 		core.ApplyOptions{
 			Force:        req.GetForce(),
@@ -205,12 +213,14 @@ func (s *ResourceService) Delete(ctx context.Context, req *pb.DeleteRequest) (*e
 
 	if err := s.resource.DeleteResource(
 		ctx,
-		req.GetCluster(),
-		req.GetGroup(),
-		req.GetVersion(),
-		req.GetResource(),
-		req.GetNamespace(),
-		req.GetName(),
+		core.ResourceIdentifier{
+			Cluster:   req.GetCluster(),
+			Group:     req.GetGroup(),
+			Version:   req.GetVersion(),
+			Resource:  req.GetResource(),
+			Namespace: req.GetNamespace(),
+			Name:      req.GetName(),
+		},
 		opts,
 	); err != nil {
 		return nil, domainErrorToConnectError(err)
@@ -227,12 +237,14 @@ func (s *ResourceService) Delete(ctx context.Context, req *pb.DeleteRequest) (*e
 func (s *ResourceService) Describe(ctx context.Context, req *pb.DescribeRequest) (*pb.DescribeResponse, error) {
 	obj, events, err := s.resource.DescribeResource(
 		ctx,
-		req.GetCluster(),
-		req.GetGroup(),
-		req.GetVersion(),
-		req.GetResource(),
-		req.GetNamespace(),
-		req.GetName(),
+		core.ResourceIdentifier{
+			Cluster:   req.GetCluster(),
+			Group:     req.GetGroup(),
+			Version:   req.GetVersion(),
+			Resource:  req.GetResource(),
+			Namespace: req.GetNamespace(),
+			Name:      req.GetName(),
+		},
 	)
 	if err != nil {
 		return nil, domainErrorToConnectError(err)
@@ -264,11 +276,13 @@ func (s *ResourceService) Describe(ctx context.Context, req *pb.DescribeRequest)
 func (s *ResourceService) Watch(ctx context.Context, req *pb.WatchRequest, stream *connect.ServerStream[pb.WatchEvent]) error {
 	watcher, err := s.resource.WatchResource(
 		ctx,
-		req.GetCluster(),
-		req.GetGroup(),
-		req.GetVersion(),
-		req.GetResource(),
-		req.GetNamespace(),
+		core.ResourceIdentifier{
+			Cluster:   req.GetCluster(),
+			Group:     req.GetGroup(),
+			Version:   req.GetVersion(),
+			Resource:  req.GetResource(),
+			Namespace: req.GetNamespace(),
+		},
 		core.WatchOptions{
 			LabelSelector:   req.GetLabelSelector(),
 			FieldSelector:   req.GetFieldSelector(),
@@ -459,12 +473,4 @@ func toProtoWatchEventType(t core.WatchEventType) pb.WatchEvent_Type {
 	default:
 		return pb.WatchEvent_TYPE_UNSPECIFIED
 	}
-}
-
-// deref returns the value pointed to by ptr, or def if ptr is nil.
-func deref[T any](ptr *T, def T) T {
-	if ptr != nil {
-		return *ptr
-	}
-	return def
 }

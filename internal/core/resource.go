@@ -137,6 +137,28 @@ type SchemaResolver interface {
 }
 
 // ---------------------------------------------------------------------------
+// Identifiers
+// ---------------------------------------------------------------------------
+
+// ResourceIdentifier identifies a Kubernetes resource type (and
+// optionally a specific instance) across clusters. It replaces long
+// positional parameter lists in use-case methods with a single,
+// self-documenting value object.
+type ResourceIdentifier struct {
+	Cluster   string
+	Group     string
+	Version   string
+	Resource  string
+	Namespace string
+	Name      string
+}
+
+// lookupGVR validates the resource triple via the DiscoveryClient.
+func (id ResourceIdentifier) lookupGVR(ctx context.Context, dc DiscoveryClient) (schema.GroupVersionResource, error) {
+	return dc.LookupResource(ctx, id.Cluster, id.Group, id.Version, id.Resource)
+}
+
+// ---------------------------------------------------------------------------
 // Use case
 // ---------------------------------------------------------------------------
 
@@ -179,28 +201,28 @@ func (uc *ResourceUseCase) ResolveSchema(
 // ListResources validates the GVR and fetches a paged resource list.
 func (uc *ResourceUseCase) ListResources(
 	ctx context.Context,
-	cluster, group, version, resource, namespace string,
+	id ResourceIdentifier,
 	opts ListOptions,
 ) (*unstructured.UnstructuredList, error) {
-	gvr, err := uc.discovery.LookupResource(ctx, cluster, group, version, resource)
+	gvr, err := id.lookupGVR(ctx, uc.discovery)
 	if err != nil {
 		return nil, err
 	}
 
-	return uc.resource.List(ctx, cluster, gvr, namespace, opts)
+	return uc.resource.List(ctx, id.Cluster, gvr, id.Namespace, opts)
 }
 
 // GetResource validates the GVR and fetches a single resource.
 func (uc *ResourceUseCase) GetResource(
 	ctx context.Context,
-	cluster, group, version, resource, namespace, name string,
+	id ResourceIdentifier,
 ) (*unstructured.Unstructured, error) {
-	gvr, err := uc.discovery.LookupResource(ctx, cluster, group, version, resource)
+	gvr, err := id.lookupGVR(ctx, uc.discovery)
 	if err != nil {
 		return nil, err
 	}
 
-	return uc.resource.Get(ctx, cluster, gvr, namespace, name)
+	return uc.resource.Get(ctx, id.Cluster, gvr, id.Namespace, id.Name)
 }
 
 // DescribeResource validates the GVR, fetches the resource, extracts
@@ -209,21 +231,21 @@ func (uc *ResourceUseCase) GetResource(
 // `kubectl describe`.
 func (uc *ResourceUseCase) DescribeResource(
 	ctx context.Context,
-	cluster, group, version, resource, namespace, name string,
+	id ResourceIdentifier,
 ) (*unstructured.Unstructured, *unstructured.UnstructuredList, error) {
-	gvr, err := uc.discovery.LookupResource(ctx, cluster, group, version, resource)
+	gvr, err := id.lookupGVR(ctx, uc.discovery)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	obj, err := uc.resource.Get(ctx, cluster, gvr, namespace, name)
+	obj, err := uc.resource.Get(ctx, id.Cluster, gvr, id.Namespace, id.Name)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	uid := string(obj.GetUID())
 
-	events, err := uc.resource.ListEvents(ctx, cluster, namespace, ListOptions{
+	events, err := uc.resource.ListEvents(ctx, id.Cluster, id.Namespace, ListOptions{
 		FieldSelector: fmt.Sprintf("involvedObject.uid=%s", uid),
 	})
 	if err != nil {
@@ -239,45 +261,45 @@ func (uc *ResourceUseCase) DescribeResource(
 // target cluster from the given YAML manifest.
 func (uc *ResourceUseCase) CreateResource(
 	ctx context.Context,
-	cluster, group, version, resource, namespace string,
+	id ResourceIdentifier,
 	manifest []byte,
 ) (*unstructured.Unstructured, error) {
-	gvr, err := uc.discovery.LookupResource(ctx, cluster, group, version, resource)
+	gvr, err := id.lookupGVR(ctx, uc.discovery)
 	if err != nil {
 		return nil, err
 	}
 
-	return uc.resource.Create(ctx, cluster, gvr, namespace, manifest)
+	return uc.resource.Create(ctx, id.Cluster, gvr, id.Namespace, manifest)
 }
 
 // ApplyResource validates the GVR and performs a server-side apply on
 // the target cluster from the given YAML manifest.
 func (uc *ResourceUseCase) ApplyResource(
 	ctx context.Context,
-	cluster, group, version, resource, namespace, name string,
+	id ResourceIdentifier,
 	manifest []byte,
 	opts ApplyOptions,
 ) (*unstructured.Unstructured, error) {
-	gvr, err := uc.discovery.LookupResource(ctx, cluster, group, version, resource)
+	gvr, err := id.lookupGVR(ctx, uc.discovery)
 	if err != nil {
 		return nil, err
 	}
 
-	return uc.resource.Apply(ctx, cluster, gvr, namespace, name, manifest, opts)
+	return uc.resource.Apply(ctx, id.Cluster, gvr, id.Namespace, id.Name, manifest, opts)
 }
 
 // DeleteResource validates the GVR and deletes the named resource.
 func (uc *ResourceUseCase) DeleteResource(
 	ctx context.Context,
-	cluster, group, version, resource, namespace, name string,
+	id ResourceIdentifier,
 	opts DeleteOptions,
 ) error {
-	gvr, err := uc.discovery.LookupResource(ctx, cluster, group, version, resource)
+	gvr, err := id.lookupGVR(ctx, uc.discovery)
 	if err != nil {
 		return err
 	}
 
-	return uc.resource.Delete(ctx, cluster, gvr, namespace, name, opts)
+	return uc.resource.Delete(ctx, id.Cluster, gvr, id.Namespace, id.Name, opts)
 }
 
 // WatchResource validates the GVR and opens a long-lived watch stream.
@@ -285,19 +307,19 @@ func (uc *ResourceUseCase) DeleteResource(
 // initial events are streamed before switching to change notifications.
 func (uc *ResourceUseCase) WatchResource(
 	ctx context.Context,
-	cluster, group, version, resource, namespace string,
+	id ResourceIdentifier,
 	opts WatchOptions,
 ) (Watcher, error) {
-	gvr, err := uc.discovery.LookupResource(ctx, cluster, group, version, resource)
+	gvr, err := id.lookupGVR(ctx, uc.discovery)
 	if err != nil {
 		return nil, err
 	}
 
-	watchList, err := uc.discovery.SupportsWatchList(ctx, cluster)
+	watchList, err := uc.discovery.SupportsWatchList(ctx, id.Cluster)
 	if err != nil {
 		return nil, err
 	}
 
 	opts.SendInitialEvents = watchList
-	return uc.resource.Watch(ctx, cluster, gvr, namespace, opts)
+	return uc.resource.Watch(ctx, id.Cluster, gvr, id.Namespace, opts)
 }

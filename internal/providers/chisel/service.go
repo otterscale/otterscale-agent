@@ -11,8 +11,6 @@ import (
 	"hash/fnv"
 	"log/slog"
 	"maps"
-	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -22,8 +20,6 @@ import (
 
 	"github.com/otterscale/otterscale-agent/internal/core"
 	"github.com/otterscale/otterscale-agent/internal/pki"
-	"github.com/otterscale/otterscale-agent/internal/transport"
-	"github.com/otterscale/otterscale-agent/internal/transport/tunnel"
 )
 
 // tunnelPort is the fixed port shared by all cluster tunnels.
@@ -37,16 +33,15 @@ const maxHosts = 254 * 254 * 254
 
 // Service manages the mapping between cluster names and unique
 // loopback addresses, and provisions chisel users for each agent.
-// It implements core.TunnelProvider and additionally exposes the
-// underlying chisel server via ServerRef() for transport-layer init.
+// It implements core.TunnelProvider and transport.TunnelService.
 type Service struct {
 	server atomic.Pointer[chserver.Server]
 	ca     *pki.CA
 	log    *slog.Logger
+	addrs  *addressAllocator
 
-	mu        sync.RWMutex
-	clusters  map[string]core.Cluster // cluster name -> tunnel state
-	usedHosts map[string]struct{}     // set of allocated hosts
+	mu       sync.RWMutex
+	clusters map[string]core.Cluster // cluster name -> tunnel state
 }
 
 // NewService returns a new Service backed by chisel. The CA is
@@ -56,10 +51,10 @@ type Service struct {
 // transport layer; see tunnel.NewServer.
 func NewService(ca *pki.CA) *Service {
 	return &Service{
-		ca:        ca,
-		log:       slog.Default().With("component", "tunnel-provider"),
-		clusters:  make(map[string]core.Cluster),
-		usedHosts: make(map[string]struct{}),
+		ca:       ca,
+		log:      slog.Default().With("component", "tunnel-provider"),
+		addrs:    newAddressAllocator(),
+		clusters: make(map[string]core.Cluster),
 	}
 }
 
@@ -102,7 +97,7 @@ func (s *Service) ListClusters() map[string]core.Cluster {
 // If the cluster was previously registered, the old host allocation
 // is released first so that re-registration always moves the cluster
 // to a fresh address.
-func (s *Service) RegisterCluster(_ context.Context, cluster, agentID, agentVersion string, csrPEM []byte) (string, []byte, error) {
+func (s *Service) RegisterCluster(ctx context.Context, cluster, agentID, agentVersion string, csrPEM []byte) (string, []byte, error) {
 	// Sign the agent's CSR with the internal CA.
 	certPEM, err := s.ca.SignCSR(csrPEM)
 	if err != nil {
@@ -132,11 +127,11 @@ func (s *Service) RegisterCluster(_ context.Context, cluster, agentID, agentVers
 	// so that stale credentials do not accumulate in chisel.
 	if prev, ok := s.clusters[cluster]; ok {
 		srv.DeleteUser(prev.User)
-		s.releaseHost(prev.Host)
+		s.addrs.release(prev.Host)
 		delete(s.clusters, cluster)
 	}
 
-	host, err := s.allocateHost(cluster)
+	host, err := s.addrs.allocate(cluster)
 	if err != nil {
 		return "", nil, err
 	}
@@ -146,7 +141,7 @@ func (s *Service) RegisterCluster(_ context.Context, cluster, agentID, agentVers
 	// from binding arbitrary endpoints.
 	allowed := fmt.Sprintf("^R:%s:%d(:.*)?$", regexp.QuoteMeta(host), tunnelPort)
 	if err := srv.AddUser(agentID, pass, allowed); err != nil {
-		s.releaseHost(host)
+		s.addrs.release(host)
 		return "", nil, err
 	}
 
@@ -176,13 +171,13 @@ func (s *Service) DeregisterCluster(cluster string) {
 		return
 	}
 	srv.DeleteUser(entry.User)
-	s.releaseHost(entry.Host)
+	s.addrs.release(entry.Host)
 	delete(s.clusters, cluster)
 }
 
 // ResolveAddress returns the HTTP base URL for the given cluster's
 // tunnel endpoint. Returns an error if the cluster is not registered.
-func (s *Service) ResolveAddress(_ context.Context, cluster string) (string, error) {
+func (s *Service) ResolveAddress(ctx context.Context, cluster string) (string, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -192,28 +187,6 @@ func (s *Service) ResolveAddress(_ context.Context, cluster string) (string, err
 	}
 
 	return fmt.Sprintf("http://%s:%d", entry.Host, tunnelPort), nil
-}
-
-// allocateHost picks a unique loopback address for the given cluster
-// by hashing the name and probing linearly until an unused address is
-// found. Must be called with mu held.
-func (s *Service) allocateHost(cluster string) (string, error) {
-	base := hashKey(cluster)
-	for i := range uint32(maxHosts) {
-		candidate := hostFromIndex((base + i) % uint32(maxHosts))
-		if _, exists := s.usedHosts[candidate]; exists {
-			continue
-		}
-		s.usedHosts[candidate] = struct{}{}
-		return candidate, nil
-	}
-	return "", fmt.Errorf("exhausted loopback address space (%d hosts)", maxHosts)
-}
-
-// releaseHost returns a previously allocated host to the pool.
-// Must be called with mu held.
-func (s *Service) releaseHost(host string) {
-	delete(s.usedHosts, host)
 }
 
 // hashKey returns a deterministic 32-bit hash of the given key using
@@ -234,80 +207,6 @@ func hostFromIndex(idx uint32) string {
 	b := (idx / 254) % 254
 	c := idx % 254
 	return fmt.Sprintf("127.%d.%d.%d", a+1, b+1, c+1)
-}
-
-// BuildTunnelListener generates a server TLS certificate for the
-// given host, writes the mTLS materials to a temporary directory,
-// and returns a fully configured tunnel transport.Listener. The
-// caller is responsible for starting the listener via transport.Serve.
-// The temporary certificate files are cleaned up when the listener
-// stops.
-func (s *Service) BuildTunnelListener(address, host string) (transport.Listener, error) {
-	serverCert, serverKey, err := s.ca.GenerateServerCert(host)
-	if err != nil {
-		return nil, fmt.Errorf("generate server cert: %w", err)
-	}
-
-	certDir, err := os.MkdirTemp("", "otterscale-tls-server-*")
-	if err != nil {
-		return nil, fmt.Errorf("create cert dir: %w", err)
-	}
-
-	caFile := filepath.Join(certDir, "ca.pem")
-	certFile := filepath.Join(certDir, "cert.pem")
-	keyFile := filepath.Join(certDir, "key.pem")
-
-	if err := os.WriteFile(caFile, s.ca.CertPEM(), 0600); err != nil {
-		os.RemoveAll(certDir)
-		return nil, fmt.Errorf("write CA cert: %w", err)
-	}
-	if err := os.WriteFile(certFile, serverCert, 0600); err != nil {
-		os.RemoveAll(certDir)
-		return nil, fmt.Errorf("write server cert: %w", err)
-	}
-	if err := os.WriteFile(keyFile, serverKey, 0600); err != nil {
-		os.RemoveAll(certDir)
-		return nil, fmt.Errorf("write server key: %w", err)
-	}
-
-	slog.Info("tunnel CA initialized", "subject", "otterscale-ca")
-
-	tunnelSrv, err := tunnel.NewServer(
-		tunnel.WithAddress(address),
-		tunnel.WithTLSCert(certFile),
-		tunnel.WithTLSKey(keyFile),
-		tunnel.WithTLSCA(caFile),
-		tunnel.WithServer(s.ServerRef()),
-	)
-	if err != nil {
-		os.RemoveAll(certDir)
-		return nil, fmt.Errorf("create tunnel server: %w", err)
-	}
-
-	return &tunnelListenerWithCleanup{
-		Listener: tunnelSrv,
-		certDir:  certDir,
-	}, nil
-}
-
-// tunnelListenerWithCleanup wraps a transport.Listener and removes
-// the temporary TLS certificate directory when stopped.
-type tunnelListenerWithCleanup struct {
-	transport.Listener
-	certDir string
-}
-
-func (l *tunnelListenerWithCleanup) Stop(ctx context.Context) error {
-	err := l.Listener.Stop(ctx)
-	os.RemoveAll(l.certDir)
-	return err
-}
-
-// BuildHealthListener returns a transport.Listener that periodically
-// health-checks registered tunnel endpoints and deregisters
-// disconnected clusters.
-func (s *Service) BuildHealthListener() transport.Listener {
-	return NewHealthCheckListener(s)
 }
 
 // parseAuth splits a "user:pass" string into its components.

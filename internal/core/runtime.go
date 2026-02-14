@@ -149,6 +149,18 @@ func (uc *RuntimeUseCase) StartExec(ctx context.Context, params StartExecParams)
 		Done:      errCh,
 	}
 
+	// Register the session BEFORE launching the goroutine to avoid
+	// wasting resources if the session store is full.
+	if err := uc.sessions.PutExec(sess); err != nil {
+		cancel()
+		stdinW.Close()
+		stdinR.Close()
+		stdoutW.Close()
+		stderrW.Close()
+		sizeQueue.Close()
+		return nil, nil, nil, err
+	}
+
 	go func() {
 		defer stdinR.Close()
 		defer stdoutW.Close()
@@ -171,14 +183,6 @@ func (uc *RuntimeUseCase) StartExec(ctx context.Context, params StartExecParams)
 		})
 	}()
 
-	if err := uc.sessions.PutExec(sess); err != nil {
-		cancel()
-		stdinW.Close()
-		stdoutW.Close()
-		stderrW.Close()
-		sizeQueue.Close()
-		return nil, nil, nil, err
-	}
 	return sess, stdoutR, stderrR, nil
 }
 
@@ -262,6 +266,16 @@ func (uc *RuntimeUseCase) StartPortForward(ctx context.Context, cluster, namespa
 		Done:   errCh,
 	}
 
+	// Register the session BEFORE launching the goroutine to avoid
+	// wasting resources if the session store is full.
+	if err := uc.sessions.PutPortForward(sess); err != nil {
+		cancel()
+		dataInW.Close()
+		dataInR.Close()
+		dataOutW.Close()
+		return nil, nil, err
+	}
+
 	go func() {
 		defer dataInR.Close()
 		defer dataOutW.Close()
@@ -272,12 +286,6 @@ func (uc *RuntimeUseCase) StartPortForward(ctx context.Context, cluster, namespa
 		})
 	}()
 
-	if err := uc.sessions.PutPortForward(sess); err != nil {
-		cancel()
-		dataInW.Close()
-		dataOutW.Close()
-		return nil, nil, err
-	}
 	return sess, dataOutR, nil
 }
 
@@ -328,18 +336,18 @@ func (uc *RuntimeUseCase) CleanupPortForward(_ context.Context, sessionID string
 
 // Scale validates the inputs, looks up the GVR, updates the desired
 // replica count, and returns the new value.
-func (uc *RuntimeUseCase) Scale(ctx context.Context, cluster, group, version, resource, namespace, name string, replicas int32) (int32, error) {
-	if name == "" {
+func (uc *RuntimeUseCase) Scale(ctx context.Context, id ResourceIdentifier, replicas int32) (int32, error) {
+	if id.Name == "" {
 		return 0, &ErrInvalidInput{Field: "name", Message: "resource name is required"}
 	}
 	if replicas < 0 {
 		return 0, &ErrInvalidInput{Field: "replicas", Message: "must be non-negative"}
 	}
-	gvr, err := uc.discovery.LookupResource(ctx, cluster, group, version, resource)
+	gvr, err := id.lookupGVR(ctx, uc.discovery)
 	if err != nil {
 		return 0, err
 	}
-	return uc.runtime.UpdateScale(ctx, cluster, gvr, namespace, name, replicas)
+	return uc.runtime.UpdateScale(ctx, id.Cluster, gvr, id.Namespace, id.Name, replicas)
 }
 
 // StartSessionReaper launches a background goroutine that
@@ -364,13 +372,13 @@ func (uc *RuntimeUseCase) StartSessionReaper(ctx context.Context, interval time.
 
 // Restart validates the inputs, looks up the GVR, and triggers a
 // rolling restart.
-func (uc *RuntimeUseCase) Restart(ctx context.Context, cluster, group, version, resource, namespace, name string) error {
-	if name == "" {
+func (uc *RuntimeUseCase) Restart(ctx context.Context, id ResourceIdentifier) error {
+	if id.Name == "" {
 		return &ErrInvalidInput{Field: "name", Message: "resource name is required"}
 	}
-	gvr, err := uc.discovery.LookupResource(ctx, cluster, group, version, resource)
+	gvr, err := id.lookupGVR(ctx, uc.discovery)
 	if err != nil {
 		return err
 	}
-	return uc.runtime.Restart(ctx, cluster, gvr, namespace, name)
+	return uc.runtime.Restart(ctx, id.Cluster, gvr, id.Namespace, id.Name)
 }

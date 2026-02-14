@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/otterscale/otterscale-agent/internal/core"
-	"github.com/otterscale/otterscale-agent/internal/providers/cache"
 )
 
 // sessionReapInterval is the interval at which the session reaper
@@ -18,12 +17,13 @@ const cacheEvictionInterval = 5 * time.Minute
 
 // ProvideBackgroundListeners constructs the background transport
 // listeners (session reaper, cache evictor) that participate in the
-// server's managed lifecycle. Centralising construction here keeps the
-// Server struct free of concrete infrastructure types.
-func ProvideBackgroundListeners(runtime *core.RuntimeUseCase, discoveryCache *cache.DiscoveryCache) BackgroundListeners {
+// server's managed lifecycle. The CacheEvictor interface decouples
+// this function from the concrete cache implementation, keeping the
+// application layer free of infrastructure dependencies.
+func ProvideBackgroundListeners(runtime *core.RuntimeUseCase, evictor core.CacheEvictor) BackgroundListeners {
 	return BackgroundListeners{
 		&sessionReaperListener{runtime: runtime},
-		&cacheEvictorListener{cache: discoveryCache},
+		&cacheEvictorListener{cache: evictor},
 	}
 }
 
@@ -43,11 +43,11 @@ func (l *sessionReaperListener) Stop(_ context.Context) error {
 	return nil // reaper stops when its context is cancelled
 }
 
-// cacheEvictorListener adapts DiscoveryCache.StartEvictionLoop to
-// the transport.Listener interface so it participates in the managed
+// cacheEvictorListener adapts a CacheEvictor to the
+// transport.Listener interface so it participates in the managed
 // lifecycle alongside other servers.
 type cacheEvictorListener struct {
-	cache *cache.DiscoveryCache
+	cache core.CacheEvictor
 }
 
 func (l *cacheEvictorListener) Start(ctx context.Context) error {
