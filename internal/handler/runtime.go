@@ -110,7 +110,7 @@ func (s *RuntimeService) ExecuteTTY(ctx context.Context, req *pb.ExecuteTTYReque
 	if err != nil {
 		return domainErrorToConnectError(err)
 	}
-	defer s.runtime.CleanupExec(sess.ID)
+	defer s.runtime.CleanupExec(ctx, sess.ID)
 
 	// Send the session ID as the first message.
 	first := &pb.ExecuteTTYResponse{}
@@ -201,16 +201,16 @@ type execChunk struct {
 }
 
 // WriteTTY sends stdin data to an active exec session.
-func (s *RuntimeService) WriteTTY(_ context.Context, req *pb.WriteTTYRequest) (*emptypb.Empty, error) {
-	if err := s.runtime.WriteExec(req.GetSessionId(), req.GetStdin()); err != nil {
+func (s *RuntimeService) WriteTTY(ctx context.Context, req *pb.WriteTTYRequest) (*emptypb.Empty, error) {
+	if err := s.runtime.WriteExec(ctx, req.GetSessionId(), req.GetStdin()); err != nil {
 		return nil, domainErrorToConnectError(err)
 	}
 	return &emptypb.Empty{}, nil
 }
 
 // ResizeTTY updates the terminal dimensions of an active exec session.
-func (s *RuntimeService) ResizeTTY(_ context.Context, req *pb.ResizeTTYRequest) (*emptypb.Empty, error) {
-	if err := s.runtime.ResizeExec(req.GetSessionId(), uint16(req.GetRows()), uint16(req.GetCols())); err != nil {
+func (s *RuntimeService) ResizeTTY(ctx context.Context, req *pb.ResizeTTYRequest) (*emptypb.Empty, error) {
+	if err := s.runtime.ResizeExec(ctx, req.GetSessionId(), uint16(req.GetRows()), uint16(req.GetCols())); err != nil {
 		return nil, domainErrorToConnectError(err)
 	}
 	return &emptypb.Empty{}, nil
@@ -234,7 +234,7 @@ func (s *RuntimeService) PortForward(ctx context.Context, req *pb.PortForwardReq
 	if err != nil {
 		return domainErrorToConnectError(err)
 	}
-	defer s.runtime.CleanupPortForward(sess.ID)
+	defer s.runtime.CleanupPortForward(ctx, sess.ID)
 
 	// Send the session ID as the first message.
 	first := &pb.PortForwardResponse{}
@@ -264,8 +264,8 @@ func (s *RuntimeService) PortForward(ctx context.Context, req *pb.PortForwardReq
 }
 
 // WritePortForward sends data to an active port-forward session.
-func (s *RuntimeService) WritePortForward(_ context.Context, req *pb.WritePortForwardRequest) (*emptypb.Empty, error) {
-	if err := s.runtime.WritePortForward(req.GetSessionId(), req.GetData()); err != nil {
+func (s *RuntimeService) WritePortForward(ctx context.Context, req *pb.WritePortForwardRequest) (*emptypb.Empty, error) {
+	if err := s.runtime.WritePortForward(ctx, req.GetSessionId(), req.GetData()); err != nil {
 		return nil, domainErrorToConnectError(err)
 	}
 	return &emptypb.Empty{}, nil

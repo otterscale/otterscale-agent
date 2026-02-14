@@ -28,20 +28,25 @@ type Config struct {
 // scans for and removes stale sessions.
 const sessionReapInterval = 30 * time.Second
 
+// cacheEvictionInterval is the interval at which the discovery cache
+// evictor removes expired schema and version entries.
+const cacheEvictionInterval = 5 * time.Minute
+
 // Server binds an HTTP server (gRPC + REST) and a chisel tunnel
 // listener, running them in parallel via transport.Serve.
 type Server struct {
-	handler *Handler
-	tunnel  transport.TunnelService
-	runtime *core.RuntimeUseCase
+	handler        *Handler
+	tunnel         transport.TunnelService
+	runtime        *core.RuntimeUseCase
+	discoveryCache *core.DiscoveryCache
 }
 
 // NewServer returns a Server wired to the given handler and tunnel
 // service. The TunnelService interface decouples the server from
 // concrete tunnel implementations, keeping infrastructure details
 // behind the interface boundary.
-func NewServer(handler *Handler, tunnel transport.TunnelService, runtime *core.RuntimeUseCase) *Server {
-	return &Server{handler: handler, tunnel: tunnel, runtime: runtime}
+func NewServer(handler *Handler, tunnel transport.TunnelService, runtime *core.RuntimeUseCase, discoveryCache *core.DiscoveryCache) *Server {
+	return &Server{handler: handler, tunnel: tunnel, runtime: runtime, discoveryCache: discoveryCache}
 }
 
 // Run starts both the HTTP and tunnel servers. It blocks until ctx
@@ -99,7 +104,11 @@ func (s *Server) Run(ctx context.Context, cfg Config) error {
 	// exec/port-forward sessions to prevent memory leaks.
 	reaper := &sessionReaperListener{runtime: s.runtime}
 
-	return transport.Serve(ctx, httpSrv, tunnelSrv, healthChecker, reaper)
+	// Cache evictor periodically removes expired discovery cache
+	// entries to prevent memory leaks from offline clusters.
+	cacheEvictor := &cacheEvictorListener{cache: s.discoveryCache}
+
+	return transport.Serve(ctx, httpSrv, tunnelSrv, healthChecker, reaper, cacheEvictor)
 }
 
 // sessionReaperListener adapts RuntimeUseCase.StartSessionReaper to
@@ -116,4 +125,20 @@ func (l *sessionReaperListener) Start(ctx context.Context) error {
 
 func (l *sessionReaperListener) Stop(_ context.Context) error {
 	return nil // reaper stops when its context is cancelled
+}
+
+// cacheEvictorListener adapts DiscoveryCache.StartEvictionLoop to
+// the transport.Listener interface so it participates in the managed
+// lifecycle alongside other servers.
+type cacheEvictorListener struct {
+	cache *core.DiscoveryCache
+}
+
+func (l *cacheEvictorListener) Start(ctx context.Context) error {
+	l.cache.StartEvictionLoop(ctx, cacheEvictionInterval)
+	return nil
+}
+
+func (l *cacheEvictorListener) Stop(_ context.Context) error {
+	return nil // evictor stops when its context is cancelled
 }

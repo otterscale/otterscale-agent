@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -11,11 +12,16 @@ import (
 	"k8s.io/kube-openapi/pkg/validation/spec"
 )
 
-// discoveryCache provides TTL-based caching with singleflight
+// DiscoveryCacheTTL is the default TTL for cached OpenAPI schemas and
+// server versions. Exported so that the DI layer can use it when
+// constructing a DiscoveryCache.
+const DiscoveryCacheTTL = 10 * time.Minute
+
+// DiscoveryCache provides TTL-based caching with singleflight
 // deduplication for OpenAPI schemas and Kubernetes server versions.
-// It reduces redundant discovery API calls when multiple concurrent
-// requests target the same cluster.
-type discoveryCache struct {
+// It implements SchemaResolver and reduces redundant discovery API
+// calls when multiple concurrent requests target the same cluster.
+type DiscoveryCache struct {
 	discovery DiscoveryClient
 	ttl       time.Duration
 
@@ -43,10 +49,10 @@ type versionCacheEntry struct {
 // caller's cancellation does not fail all singleflight waiters.
 const singleflightFetchTimeout = 30 * time.Second
 
-// newDiscoveryCache returns a discoveryCache that wraps the given
+// NewDiscoveryCache returns a DiscoveryCache that wraps the given
 // DiscoveryClient and caches results for the specified TTL.
-func newDiscoveryCache(discovery DiscoveryClient, ttl time.Duration) *discoveryCache {
-	return &discoveryCache{
+func NewDiscoveryCache(discovery DiscoveryClient, ttl time.Duration) *DiscoveryCache {
+	return &DiscoveryCache{
 		discovery:    discovery,
 		ttl:          ttl,
 		schemaCache:  make(map[string]*schemaCacheEntry),
@@ -57,7 +63,7 @@ func newDiscoveryCache(discovery DiscoveryClient, ttl time.Duration) *discoveryC
 // ResolveSchema fetches the OpenAPI schema for the given GVK. Results
 // are cached for the configured TTL and concurrent requests for the
 // same key are deduplicated via singleflight.
-func (c *discoveryCache) ResolveSchema(
+func (c *DiscoveryCache) ResolveSchema(
 	ctx context.Context,
 	cluster, group, version, kind string,
 ) (*spec.Schema, error) {
@@ -103,7 +109,7 @@ func (c *discoveryCache) ResolveSchema(
 // ServerVersion returns the cached Kubernetes version for the given
 // cluster. Results are cached for the configured TTL and concurrent
 // requests are deduplicated via singleflight.
-func (c *discoveryCache) ServerVersion(ctx context.Context, cluster string) (*version.Info, error) {
+func (c *DiscoveryCache) ServerVersion(ctx context.Context, cluster string) (*version.Info, error) {
 	c.mu.RLock()
 	entry, ok := c.versionCache[cluster]
 	c.mu.RUnlock()
@@ -139,13 +145,40 @@ func (c *discoveryCache) ServerVersion(ctx context.Context, cluster string) (*ve
 }
 
 // schemaCacheKey builds a cache key from the cluster/group/version/kind tuple.
-func (c *discoveryCache) schemaCacheKey(cluster, group, version, kind string) string {
+func (c *DiscoveryCache) schemaCacheKey(cluster, group, version, kind string) string {
 	return strings.Join([]string{cluster, group, version, kind}, "/")
+}
+
+// StartEvictionLoop launches a background goroutine that periodically
+// removes expired cache entries. This prevents memory leaks when
+// clusters go offline or schemas are no longer queried. It blocks
+// until ctx is cancelled.
+func (c *DiscoveryCache) StartEvictionLoop(ctx context.Context, interval time.Duration) {
+	log := slog.Default().With("component", "discovery-cache-evictor")
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			c.mu.Lock()
+			before := len(c.schemaCache) + len(c.versionCache)
+			c.evictExpired()
+			after := len(c.schemaCache) + len(c.versionCache)
+			c.mu.Unlock()
+
+			if evicted := before - after; evicted > 0 {
+				log.Info("evicted expired cache entries", "count", evicted)
+			}
+		}
+	}
 }
 
 // evictExpired removes expired entries from the schema and version
 // caches. Must be called with mu held for writing.
-func (c *discoveryCache) evictExpired() {
+func (c *DiscoveryCache) evictExpired() {
 	now := time.Now()
 	for key, entry := range c.schemaCache {
 		if now.After(entry.expiresAt) {

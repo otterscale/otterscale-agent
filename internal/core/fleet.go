@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"strings"
 	"time"
@@ -24,6 +25,28 @@ const maxClusterNameLength = 63
 // alphanumeric character. This prevents YAML injection via cluster
 // names that contain quotes, newlines, or other special characters.
 var reClusterName = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
+
+// ValidateClusterName checks that the given cluster name is non-empty,
+// within the Kubernetes label value length limit, and matches the
+// allowed character pattern. It returns an *ErrInvalidInput on failure.
+func ValidateClusterName(cluster string) error {
+	if cluster == "" {
+		return &ErrInvalidInput{Field: "cluster", Message: "must not be empty"}
+	}
+	if len(cluster) > maxClusterNameLength {
+		return &ErrInvalidInput{
+			Field:   "cluster",
+			Message: fmt.Sprintf("must not exceed %d characters", maxClusterNameLength),
+		}
+	}
+	if !reClusterName.MatchString(cluster) {
+		return &ErrInvalidInput{
+			Field:   "cluster",
+			Message: fmt.Sprintf("must match [a-z0-9]([a-z0-9-]*[a-z0-9])?, got %q", cluster),
+		}
+	}
+	return nil
+}
 
 // TunnelProvider is the server-side abstraction for managing reverse
 // tunnels. It allocates unique endpoints per cluster, signs agent
@@ -167,20 +190,8 @@ func (uc *FleetUseCase) ListClusters(_ context.Context) map[string]Cluster {
 // the tunnel provider for signing, and returns the signed certificate,
 // CA certificate, tunnel endpoint, and the server's version.
 func (uc *FleetUseCase) RegisterCluster(ctx context.Context, cluster, agentID, agentVersion string, csrPEM []byte) (Registration, error) {
-	if cluster == "" {
-		return Registration{}, &ErrInvalidInput{Field: "cluster", Message: "must not be empty"}
-	}
-	if len(cluster) > maxClusterNameLength {
-		return Registration{}, &ErrInvalidInput{
-			Field:   "cluster",
-			Message: fmt.Sprintf("must not exceed %d characters", maxClusterNameLength),
-		}
-	}
-	if !reClusterName.MatchString(cluster) {
-		return Registration{}, &ErrInvalidInput{
-			Field:   "cluster",
-			Message: fmt.Sprintf("must match [a-z0-9]([a-z0-9-]*[a-z0-9])?, got %q", cluster),
-		}
+	if err := ValidateClusterName(cluster); err != nil {
+		return Registration{}, err
 	}
 	if agentID == "" {
 		return Registration{}, &ErrInvalidInput{Field: "agent_id", Message: "must not be empty"}
@@ -213,10 +224,30 @@ func (uc *FleetUseCase) IssueManifestURL(_ context.Context, cluster, userName st
 	return strings.TrimRight(uc.manifestCfg.ServerURL, "/") + "/fleet/manifest/" + token, nil
 }
 
+// errInvalidToken is the generic error returned for all token
+// verification failures. Using a single message prevents attackers
+// from inferring the verification stage that failed (e.g. decode vs
+// signature vs expiry).
+var errInvalidToken = fmt.Errorf("invalid or expired token")
+
 // VerifyManifestToken validates the HMAC signature and expiry of a
 // manifest token and returns the embedded cluster name and user
-// identity.
+// identity. All verification failures return a generic error to
+// avoid leaking which stage failed; detailed reasons are logged at
+// debug level.
 func (uc *FleetUseCase) VerifyManifestToken(_ context.Context, token string) (cluster, userName string, err error) {
+	cluster, userName, err = uc.verifyManifestTokenInternal(token)
+	if err != nil {
+		slog.Debug("manifest token verification failed", "error", err)
+		return "", "", errInvalidToken
+	}
+	return cluster, userName, nil
+}
+
+// verifyManifestTokenInternal performs the actual token verification
+// with detailed error messages for logging. The caller wraps failures
+// into a generic error before returning to the transport layer.
+func (uc *FleetUseCase) verifyManifestTokenInternal(token string) (cluster, userName string, err error) {
 	parts := strings.SplitN(token, ".", 2)
 	if len(parts) != 2 {
 		return "", "", fmt.Errorf("malformed token")
@@ -286,14 +317,8 @@ type manifestTokenClaims struct {
 // ClusterRoleBinding (binding userName to cluster-admin), and a
 // Deployment that runs the agent with the correct server/tunnel URLs.
 func (uc *FleetUseCase) GenerateAgentManifest(_ context.Context, cluster, userName string) (string, error) {
-	if cluster == "" {
-		return "", &ErrInvalidInput{Field: "cluster", Message: "must not be empty"}
-	}
-	if !reClusterName.MatchString(cluster) {
-		return "", &ErrInvalidInput{
-			Field:   "cluster",
-			Message: fmt.Sprintf("must match [a-z0-9]([a-z0-9-]*[a-z0-9])?, got %q", cluster),
-		}
+	if err := ValidateClusterName(cluster); err != nil {
+		return "", err
 	}
 	if userName == "" {
 		return "", &ErrInvalidInput{Field: "user_name", Message: "must not be empty"}

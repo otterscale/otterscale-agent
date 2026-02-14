@@ -2,6 +2,7 @@ package kubernetes
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -160,13 +161,17 @@ func (r *resourceRepo) Delete(
 // given options. When SendInitialEvents is true, the server streams
 // the current state before switching to change notifications (requires
 // Kubernetes >= 1.34).
+//
+// The returned core.Watcher adapts the Kubernetes watch.Interface to
+// the domain-level event model, keeping the core layer free of
+// client-go watch types.
 func (r *resourceRepo) Watch(
 	ctx context.Context,
 	cluster string,
 	gvr schema.GroupVersionResource,
 	namespace string,
 	opts core.WatchOptions,
-) (watch.Interface, error) {
+) (core.Watcher, error) {
 	client, err := r.client(ctx, cluster)
 	if err != nil {
 		return nil, err
@@ -186,7 +191,93 @@ func (r *resourceRepo) Watch(
 	}
 
 	result, err := client.Resource(gvr).Namespace(namespace).Watch(ctx, listOpts)
-	return result, wrapK8sError(err)
+	if err != nil {
+		return nil, wrapK8sError(err)
+	}
+
+	return newWatcherAdapter(result), nil
+}
+
+// watcherAdapter bridges a Kubernetes watch.Interface to the domain
+// core.Watcher interface by converting watch.Event objects into
+// core.WatchEvent values with generic map[string]any payloads.
+type watcherAdapter struct {
+	inner watch.Interface
+	ch    chan core.WatchEvent
+	done  chan struct{}
+}
+
+func newWatcherAdapter(inner watch.Interface) *watcherAdapter {
+	w := &watcherAdapter{
+		inner: inner,
+		ch:    make(chan core.WatchEvent),
+		done:  make(chan struct{}),
+	}
+	go w.relay()
+	return w
+}
+
+func (w *watcherAdapter) ResultChan() <-chan core.WatchEvent {
+	return w.ch
+}
+
+func (w *watcherAdapter) Stop() {
+	w.inner.Stop()
+}
+
+// relay reads from the Kubernetes watch channel and converts events
+// to domain WatchEvents. It closes the output channel when the
+// upstream channel is closed.
+func (w *watcherAdapter) relay() {
+	defer close(w.ch)
+
+	for event := range w.inner.ResultChan() {
+		domainEvent := core.WatchEvent{
+			Type: toCorEventType(event.Type),
+		}
+
+		switch obj := event.Object.(type) {
+		case *unstructured.Unstructured:
+			domainEvent.Object = obj.Object
+		case *metav1.Status:
+			// Convert Status to a generic map for error events.
+			domainEvent.Object = statusToGenericMap(obj)
+		}
+
+		w.ch <- domainEvent
+	}
+}
+
+func toCorEventType(t watch.EventType) core.WatchEventType {
+	switch t {
+	case watch.Added:
+		return core.WatchEventAdded
+	case watch.Modified:
+		return core.WatchEventModified
+	case watch.Deleted:
+		return core.WatchEventDeleted
+	case watch.Bookmark:
+		return core.WatchEventBookmark
+	case watch.Error:
+		return core.WatchEventError
+	default:
+		return core.WatchEventError
+	}
+}
+
+// statusToGenericMap converts a Kubernetes Status object to a generic
+// map for inclusion in domain watch events.
+func statusToGenericMap(status *metav1.Status) map[string]any {
+	// Use JSON round-trip for a simple, accurate conversion.
+	data, err := json.Marshal(status)
+	if err != nil {
+		return nil
+	}
+	var m map[string]any
+	if err := json.Unmarshal(data, &m); err != nil {
+		return nil
+	}
+	return m
 }
 
 // ---------------------------------------------------------------------------

@@ -3,13 +3,11 @@ package core
 import (
 	"context"
 	"fmt"
-	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/version"
-	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/kube-openapi/pkg/validation/spec"
 )
 
@@ -70,7 +68,7 @@ type ResourceRepo interface {
 	// given options.
 	Watch(ctx context.Context, cluster string, gvr schema.GroupVersionResource,
 		namespace string, opts WatchOptions,
-	) (watch.Interface, error)
+	) (Watcher, error)
 
 	// ListEvents returns events matching the given options.
 	// Used by DescribeResource to fetch events via involvedObject.uid.
@@ -112,13 +110,13 @@ type WatchOptions struct {
 	SendInitialEvents bool
 }
 
-// ---------------------------------------------------------------------------
-// Cache constants
-// ---------------------------------------------------------------------------
-
-// discoveryCacheTTL controls how long resolved OpenAPI schemas and
-// server versions are kept in memory before being re-fetched.
-const discoveryCacheTTL = 10 * time.Minute
+// SchemaResolver resolves OpenAPI schemas for Kubernetes GVKs.
+// Implementations may cache results and deduplicate concurrent
+// requests. Defining this as an interface decouples the use-case
+// layer from the caching infrastructure.
+type SchemaResolver interface {
+	ResolveSchema(ctx context.Context, cluster, group, version, kind string) (*spec.Schema, error)
+}
 
 // ---------------------------------------------------------------------------
 // Use case
@@ -126,22 +124,23 @@ const discoveryCacheTTL = 10 * time.Minute
 
 // ResourceUseCase provides the application-level API for managing
 // Kubernetes resources across multiple clusters. It validates GVRs
-// via the DiscoveryClient, caches OpenAPI schemas with singleflight
-// deduplication, and strips noisy metadata (managedFields,
-// last-applied-configuration) from list results.
+// via the DiscoveryClient and resolves OpenAPI schemas through the
+// injected SchemaResolver.
 type ResourceUseCase struct {
-	discovery DiscoveryClient
-	resource  ResourceRepo
-	cache     *discoveryCache
+	discovery      DiscoveryClient
+	resource       ResourceRepo
+	schemaResolver SchemaResolver
 }
 
 // NewResourceUseCase returns a ResourceUseCase wired to the given
-// discovery and resource backends.
-func NewResourceUseCase(discovery DiscoveryClient, resource ResourceRepo) *ResourceUseCase {
+// discovery, resource, and schema resolver backends. The
+// SchemaResolver is injected to decouple caching infrastructure
+// from the domain use-case.
+func NewResourceUseCase(discovery DiscoveryClient, resource ResourceRepo, schemaResolver SchemaResolver) *ResourceUseCase {
 	return &ResourceUseCase{
-		discovery: discovery,
-		resource:  resource,
-		cache:     newDiscoveryCache(discovery, discoveryCacheTTL),
+		discovery:      discovery,
+		resource:       resource,
+		schemaResolver: schemaResolver,
 	}
 }
 
@@ -150,17 +149,16 @@ func (uc *ResourceUseCase) ServerResources(ctx context.Context, cluster string) 
 	return uc.discovery.ServerResources(ctx, cluster)
 }
 
-// ResolveSchema fetches the OpenAPI schema for the given GVK. Results
-// are cached and concurrent requests for the same key are deduplicated.
+// ResolveSchema fetches the OpenAPI schema for the given GVK via the
+// injected SchemaResolver.
 func (uc *ResourceUseCase) ResolveSchema(
 	ctx context.Context,
 	cluster, group, version, kind string,
 ) (*spec.Schema, error) {
-	return uc.cache.ResolveSchema(ctx, cluster, group, version, kind)
+	return uc.schemaResolver.ResolveSchema(ctx, cluster, group, version, kind)
 }
 
-// ListResources validates the GVR, fetches a paged resource list, and
-// strips noisy metadata from each item before returning.
+// ListResources validates the GVR and fetches a paged resource list.
 func (uc *ResourceUseCase) ListResources(
 	ctx context.Context,
 	cluster, group, version, resource, namespace string,
@@ -171,16 +169,7 @@ func (uc *ResourceUseCase) ListResources(
 		return nil, err
 	}
 
-	list, err := uc.resource.List(ctx, cluster, gvr, namespace, opts)
-	if err != nil {
-		return nil, err
-	}
-
-	for i := range list.Items {
-		cleanObject(&list.Items[i])
-	}
-
-	return list, nil
+	return uc.resource.List(ctx, cluster, gvr, namespace, opts)
 }
 
 // GetResource validates the GVR and fetches a single resource.
@@ -280,7 +269,7 @@ func (uc *ResourceUseCase) WatchResource(
 	ctx context.Context,
 	cluster, group, version, resource, namespace string,
 	opts WatchOptions,
-) (watch.Interface, error) {
+) (Watcher, error) {
 	gvr, err := uc.discovery.LookupResource(ctx, cluster, group, version, resource)
 	if err != nil {
 		return nil, err
@@ -295,27 +284,4 @@ func (uc *ResourceUseCase) WatchResource(
 	return uc.resource.Watch(ctx, cluster, gvr, namespace, opts)
 }
 
-// ---------------------------------------------------------------------------
-// Internal helpers
-// ---------------------------------------------------------------------------
-
-// cleanObject strips noisy metadata that clutters list output:
-//   - metadata.managedFields (server-side apply bookkeeping)
-//   - the kubectl.kubernetes.io/last-applied-configuration annotation
-func cleanObject(obj *unstructured.Unstructured) {
-	unstructured.RemoveNestedField(obj.Object, "metadata", "managedFields")
-
-	annotations := obj.GetAnnotations()
-	if len(annotations) > 0 {
-		if _, exists := annotations["kubectl.kubernetes.io/last-applied-configuration"]; exists {
-			delete(annotations, "kubectl.kubernetes.io/last-applied-configuration")
-
-			if len(annotations) == 0 {
-				unstructured.RemoveNestedField(obj.Object, "metadata", "annotations")
-			} else {
-				obj.SetAnnotations(annotations)
-			}
-		}
-	}
-}
 

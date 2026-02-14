@@ -10,11 +10,9 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/structpb"
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/kube-openapi/pkg/validation/spec"
 
 	pb "github.com/otterscale/otterscale-agent/api/resource/v1"
@@ -55,7 +53,7 @@ func (s *ResourceService) Discovery(ctx context.Context, req *pb.DiscoveryReques
 
 	pbAPIResources, err := toProtoAPIResources(apiResources)
 	if err != nil {
-		return nil, err
+		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
 	resp := &pb.DiscoveryResponse{}
@@ -76,7 +74,11 @@ func (s *ResourceService) Schema(ctx context.Context, req *pb.SchemaRequest) (*s
 	if err != nil {
 		return nil, domainErrorToConnectError(err)
 	}
-	return toProtoStructFromJSONSchema(resolved)
+	result, err := toProtoStructFromJSONSchema(resolved)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	return result, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -103,9 +105,16 @@ func (s *ResourceService) List(ctx context.Context, req *pb.ListRequest) (*pb.Li
 		return nil, domainErrorToConnectError(err)
 	}
 
+	// Strip noisy metadata (managedFields, last-applied-configuration)
+	// before serialising to protobuf. This is a presentation concern
+	// that belongs in the handler layer, not the domain use-case.
+	for i := range resources.Items {
+		cleanObject(&resources.Items[i])
+	}
+
 	pbResources, err := toProtoResources(resources.Items)
 	if err != nil {
-		return nil, err
+		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
 	resp := &pb.ListResponse{}
@@ -130,7 +139,11 @@ func (s *ResourceService) Get(ctx context.Context, req *pb.GetRequest) (*pb.Reso
 	if err != nil {
 		return nil, domainErrorToConnectError(err)
 	}
-	return toProtoResource(resource.Object)
+	result, err := toProtoResource(resource.Object)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	return result, nil
 }
 
 // Create creates a new resource from the YAML manifest in the request.
@@ -147,7 +160,11 @@ func (s *ResourceService) Create(ctx context.Context, req *pb.CreateRequest) (*p
 	if err != nil {
 		return nil, domainErrorToConnectError(err)
 	}
-	return toProtoResource(resource.Object)
+	result, err := toProtoResource(resource.Object)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	return result, nil
 }
 
 // Apply performs a server-side apply for the given resource.
@@ -169,7 +186,11 @@ func (s *ResourceService) Apply(ctx context.Context, req *pb.ApplyRequest) (*pb.
 	if err != nil {
 		return nil, domainErrorToConnectError(err)
 	}
-	return toProtoResource(resource.Object)
+	result, err := toProtoResource(resource.Object)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	return result, nil
 }
 
 // Delete removes the named resource. An optional grace period may be
@@ -218,12 +239,12 @@ func (s *ResourceService) Describe(ctx context.Context, req *pb.DescribeRequest)
 
 	pbResource, err := toProtoResource(obj.Object)
 	if err != nil {
-		return nil, err
+		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
 	pbEvents, err := toProtoResources(events.Items)
 	if err != nil {
-		return nil, err
+		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
 	resp := &pb.DescribeResponse{}
@@ -284,19 +305,17 @@ func (s *ResourceService) Watch(ctx context.Context, req *pb.WatchRequest, strea
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-// processEvent converts a single Kubernetes watch.Event into a
-// protobuf WatchEvent. Returns false if the event should be skipped
-// (e.g. unexpected type).
-func processEvent(event watch.Event) (*pb.WatchEvent, bool) {
+// processEvent converts a domain core.WatchEvent into a protobuf
+// WatchEvent. Returns false if the event should be skipped.
+func processEvent(event core.WatchEvent) (*pb.WatchEvent, bool) {
 	switch event.Type {
-	case watch.Added, watch.Modified, watch.Deleted:
-		obj, ok := event.Object.(*unstructured.Unstructured)
-		if !ok {
-			slog.Warn("watch: unexpected object type", "eventType", event.Type)
+	case core.WatchEventAdded, core.WatchEventModified, core.WatchEventDeleted:
+		if event.Object == nil {
+			slog.Warn("watch: nil object", "eventType", event.Type)
 			return nil, false
 		}
 
-		resource, err := toProtoResource(obj.Object)
+		resource, err := toProtoResource(event.Object)
 		if err != nil {
 			slog.Warn("watch: failed to convert resource to proto", "eventType", event.Type, "error", err)
 			return nil, false
@@ -307,29 +326,25 @@ func processEvent(event watch.Event) (*pb.WatchEvent, bool) {
 		ret.SetResource(resource)
 		return ret, true
 
-	case watch.Bookmark:
-		metadata, err := meta.Accessor(event.Object)
-		if err != nil {
-			slog.Warn("watch: failed to access bookmark metadata", "error", err)
-			return nil, false
-		}
-
+	case core.WatchEventBookmark:
 		ret := &pb.WatchEvent{}
 		ret.SetType(pb.WatchEvent_TYPE_BOOKMARK)
-		ret.SetResourceVersion(metadata.GetResourceVersion())
+		// Extract resourceVersion from the bookmark object.
+		if event.Object != nil {
+			if metadata, ok := event.Object["metadata"].(map[string]any); ok {
+				if rv, ok := metadata["resourceVersion"].(string); ok {
+					ret.SetResourceVersion(rv)
+				}
+			}
+		}
 		return ret, true
 
-	case watch.Error:
+	case core.WatchEventError:
 		ret := &pb.WatchEvent{}
 		ret.SetType(pb.WatchEvent_TYPE_ERROR)
-		// Extract the Status object from the error event so
-		// clients can inspect the reason (e.g. 410 Gone → re-list).
-		if status, ok := event.Object.(*metav1.Status); ok {
-			statusMap, err := statusToMap(status)
-			if err == nil {
-				if resource, err := toProtoResource(statusMap); err == nil {
-					ret.SetResource(resource)
-				}
+		if event.Object != nil {
+			if resource, err := toProtoResource(event.Object); err == nil {
+				ret.SetResource(resource)
 			}
 		}
 		return ret, true
@@ -344,7 +359,12 @@ func processEvent(event watch.Event) (*pb.WatchEvent, bool) {
 // into a single []*pb.APIResource list, embedding the parsed
 // group/version into each entry.
 func toProtoAPIResources(list []*metav1.APIResourceList) ([]*pb.APIResource, error) {
-	ret := []*pb.APIResource{}
+	// Estimate total capacity to avoid repeated allocations.
+	total := 0
+	for i := range list {
+		total += len(list[i].APIResources)
+	}
+	ret := make([]*pb.APIResource, 0, total)
 
 	for i := range list {
 		gv, err := schema.ParseGroupVersion(list[i].GroupVersion)
@@ -394,7 +414,7 @@ func toProtoStructFromJSONSchema(js *spec.Schema) (*structpb.Struct, error) {
 // toProtoResources converts a slice of Unstructured objects into
 // protobuf Resource messages.
 func toProtoResources(list []unstructured.Unstructured) ([]*pb.Resource, error) {
-	ret := []*pb.Resource{}
+	ret := make([]*pb.Resource, 0, len(list))
 
 	for i := range list {
 		res, err := toProtoResource(list[i].Object)
@@ -421,38 +441,23 @@ func toProtoResource(obj map[string]any) (*pb.Resource, error) {
 	return ret, nil
 }
 
-// toProtoWatchEventType maps a Kubernetes watch.EventType to the
-// protobuf WatchEvent_Type enum.
-func toProtoWatchEventType(t watch.EventType) pb.WatchEvent_Type {
+// toProtoWatchEventType maps a domain WatchEventType to the protobuf
+// WatchEvent_Type enum.
+func toProtoWatchEventType(t core.WatchEventType) pb.WatchEvent_Type {
 	switch t {
-	case watch.Added:
+	case core.WatchEventAdded:
 		return pb.WatchEvent_TYPE_ADDED
-	case watch.Modified:
+	case core.WatchEventModified:
 		return pb.WatchEvent_TYPE_MODIFIED
-	case watch.Deleted:
+	case core.WatchEventDeleted:
 		return pb.WatchEvent_TYPE_DELETED
-	case watch.Bookmark:
+	case core.WatchEventBookmark:
 		return pb.WatchEvent_TYPE_BOOKMARK
-	case watch.Error:
+	case core.WatchEventError:
 		return pb.WatchEvent_TYPE_ERROR
 	default:
 		return pb.WatchEvent_TYPE_UNSPECIFIED
 	}
-}
-
-// statusToMap converts a Kubernetes Status object into a generic
-// map[string]any so it can be serialised as a protobuf Struct and
-// included in watch error events.
-func statusToMap(status *metav1.Status) (map[string]any, error) {
-	data, err := json.Marshal(status)
-	if err != nil {
-		return nil, err
-	}
-	var m map[string]any
-	if err := json.Unmarshal(data, &m); err != nil {
-		return nil, err
-	}
-	return m, nil
 }
 
 // deref returns the value pointed to by ptr, or def if ptr is nil.

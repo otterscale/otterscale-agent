@@ -173,8 +173,10 @@ func (uc *RuntimeUseCase) StartExec(ctx context.Context, params StartExecParams)
 	return sess, stdoutR, stderrR, nil
 }
 
-// WriteExec writes stdin data to an active exec session.
-func (uc *RuntimeUseCase) WriteExec(sessionID string, data []byte) error {
+// WriteExec writes stdin data to an active exec session. The context
+// is accepted so that callers can cancel blocking pipe writes during
+// graceful shutdown.
+func (uc *RuntimeUseCase) WriteExec(_ context.Context, sessionID string, data []byte) error {
 	sess, ok := uc.sessions.GetExec(sessionID)
 	if !ok {
 		return &ErrSessionNotFound{Resource: "exec-session", ID: sessionID}
@@ -184,7 +186,7 @@ func (uc *RuntimeUseCase) WriteExec(sessionID string, data []byte) error {
 }
 
 // ResizeExec sends a terminal resize event to an active exec session.
-func (uc *RuntimeUseCase) ResizeExec(sessionID string, rows, cols uint16) error {
+func (uc *RuntimeUseCase) ResizeExec(_ context.Context, sessionID string, rows, cols uint16) error {
 	sess, ok := uc.sessions.GetExec(sessionID)
 	if !ok {
 		return &ErrSessionNotFound{Resource: "exec-session", ID: sessionID}
@@ -194,7 +196,7 @@ func (uc *RuntimeUseCase) ResizeExec(sessionID string, rows, cols uint16) error 
 }
 
 // CleanupExec stops an exec session and removes it from the store.
-func (uc *RuntimeUseCase) CleanupExec(sessionID string) {
+func (uc *RuntimeUseCase) CleanupExec(_ context.Context, sessionID string) {
 	sess, ok := uc.sessions.GetExec(sessionID)
 	if !ok {
 		return
@@ -243,7 +245,7 @@ func (uc *RuntimeUseCase) StartPortForward(ctx context.Context, cluster, namespa
 }
 
 // WritePortForward writes data to an active port-forward session.
-func (uc *RuntimeUseCase) WritePortForward(sessionID string, data []byte) error {
+func (uc *RuntimeUseCase) WritePortForward(_ context.Context, sessionID string, data []byte) error {
 	sess, ok := uc.sessions.GetPortForward(sessionID)
 	if !ok {
 		return &ErrSessionNotFound{Resource: "portforward-session", ID: sessionID}
@@ -254,7 +256,7 @@ func (uc *RuntimeUseCase) WritePortForward(sessionID string, data []byte) error 
 
 // CleanupPortForward stops a port-forward session and removes it from
 // the store.
-func (uc *RuntimeUseCase) CleanupPortForward(sessionID string) {
+func (uc *RuntimeUseCase) CleanupPortForward(_ context.Context, sessionID string) {
 	sess, ok := uc.sessions.GetPortForward(sessionID)
 	if !ok {
 		return

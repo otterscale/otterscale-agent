@@ -59,14 +59,15 @@ func wireServer(v core.Version, conf *config.Config) (*server.Server, func(), er
 	fleetService := handler.NewFleetService(fleetUseCase)
 	kubernetesKubernetes := kubernetes.New(service)
 	discoveryClient := kubernetes.NewDiscoveryClient(kubernetesKubernetes)
+	discoveryCache := core.NewDiscoveryCache(discoveryClient, core.DiscoveryCacheTTL)
 	resourceRepo := kubernetes.NewResourceRepo(kubernetesKubernetes)
-	resourceUseCase := core.NewResourceUseCase(discoveryClient, resourceRepo)
+	resourceUseCase := core.NewResourceUseCase(discoveryClient, resourceRepo, discoveryCache)
 	resourceService := handler.NewResourceService(resourceUseCase)
 	runtimeRepo := kubernetes.NewRuntimeRepo(kubernetesKubernetes)
 	runtimeUseCase := core.NewRuntimeUseCase(discoveryClient, runtimeRepo)
 	runtimeService := handler.NewRuntimeService(runtimeUseCase)
 	handler := server.NewHandler(fleetService, resourceService, runtimeService)
-	serverServer := server.NewServer(handler, service, runtimeUseCase)
+	serverServer := server.NewServer(handler, service, runtimeUseCase, discoveryCache)
 	return serverServer, func() {
 	}, nil
 }

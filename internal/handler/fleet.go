@@ -9,7 +9,6 @@ import (
 	"errors"
 	"slices"
 
-	"connectrpc.com/authn"
 	"connectrpc.com/connect"
 
 	pb "github.com/otterscale/otterscale-agent/api/fleet/v1"
@@ -67,7 +66,7 @@ func (s *FleetService) Register(ctx context.Context, req *pb.RegisterRequest) (*
 // The manifest includes a ClusterRoleBinding that grants the
 // authenticated user cluster-admin access.
 func (s *FleetService) GetAgentManifest(ctx context.Context, req *pb.GetAgentManifestRequest) (*pb.GetAgentManifestResponse, error) {
-	userInfo, ok := authn.GetInfo(ctx).(core.UserInfo)
+	userInfo, ok := core.UserInfoFromContext(ctx)
 	if !ok {
 		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("user info not found in context"))
 	}

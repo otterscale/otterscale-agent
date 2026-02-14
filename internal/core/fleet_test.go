@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -246,8 +247,8 @@ func TestFleetUseCase_VerifyManifestToken_TamperedSignature(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for tampered token")
 	}
-	if !strings.Contains(err.Error(), "invalid token signature") {
-		t.Errorf("expected 'invalid token signature' error, got: %v", err)
+	if !strings.Contains(err.Error(), "invalid or expired token") {
+		t.Errorf("expected 'invalid or expired token' error, got: %v", err)
 	}
 }
 
@@ -292,18 +293,8 @@ func TestFleetUseCase_GenerateAgentManifest_Success(t *testing.T) {
 	}
 }
 
-// isErrInvalidInput checks if err is *ErrInvalidInput (helper for tests).
+// isErrInvalidInput checks if err is *ErrInvalidInput using the
+// standard errors.As mechanism.
 func isErrInvalidInput(err error, target **ErrInvalidInput) bool {
-	for err != nil {
-		if e, ok := err.(*ErrInvalidInput); ok {
-			*target = e
-			return true
-		}
-		if u, ok := err.(interface{ Unwrap() error }); ok {
-			err = u.Unwrap()
-		} else {
-			return false
-		}
-	}
-	return false
+	return errors.As(err, target)
 }
