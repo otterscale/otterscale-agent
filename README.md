@@ -1,6 +1,5 @@
 # OtterScale Agent
 
-[![Go Report Card](https://goreportcard.com/badge/github.com/otterscale/otterscale-agent)](https://goreportcard.com/report/github.com/otterscale/otterscale-agent)
 ![License](https://img.shields.io/badge/License-Apache%202.0-blue)
 ![FIPS 140-3](https://img.shields.io/badge/FIPS%20140--3-enabled-green)
 
