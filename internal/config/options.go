@@ -33,6 +33,7 @@ var AgentOptions = []Option{
 	{Key: keyAgentCluster, Flag: toFlag(keyAgentCluster), Default: "default", Description: "Agent cluster"},
 	{Key: keyAgentServerURL, Flag: toFlag(keyAgentServerURL), Default: "http://127.0.0.1:8299", Description: "Agent control-plane server url"},
 	{Key: keyAgentTunnelServerURL, Flag: toFlag(keyAgentTunnelServerURL), Default: "https://127.0.0.1:8300", Description: "Agent tunnel server url"},
+	{Key: keyAgentBootstrap, Flag: toFlag(keyAgentBootstrap), Default: true, Description: "Run Layer 0 bootstrap on startup (install FluxCD + Module CRD)"},
 }
 
 // toFlag converts a viper key like "server.tunnel.key_seed" into a

@@ -20,6 +20,8 @@ import (
 
 	"github.com/spf13/cobra"
 	"golang.org/x/crypto/hkdf"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/otterscale/otterscale-agent/internal/cmd"
 	"github.com/otterscale/otterscale-agent/internal/cmd/agent"
@@ -102,6 +104,17 @@ func provideCA(conf *config.Config) (*pki.CA, error) {
 			"set --tunnel-ca-seed or OTTERSCALE_SERVER_TUNNEL_CA_SEED to a unique secret")
 	}
 	return pki.NewCAFromSeed(seed)
+}
+
+// provideInClusterConfig is a Wire provider that returns a
+// *rest.Config for in-cluster Kubernetes API access. It falls back to
+// the user's kubeconfig for local development.
+func provideInClusterConfig() (*rest.Config, error) {
+	cfg, err := rest.InClusterConfig()
+	if err != nil {
+		return clientcmd.BuildConfigFromFlags("", clientcmd.RecommendedHomeFile)
+	}
+	return cfg, nil
 }
 
 // provideAgentManifestConfig is a Wire provider that extracts the

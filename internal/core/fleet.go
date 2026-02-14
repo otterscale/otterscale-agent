@@ -306,6 +306,26 @@ rules:
   - apiGroups: [""]
     resources: ["users", "groups"]
     verbs: ["impersonate"]
+  # Bootstrap: core resources required by FluxCD and Module CRD.
+  - apiGroups: [""]
+    resources: ["namespaces", "serviceaccounts", "services", "configmaps", "secrets"]
+    verbs: ["get", "create", "patch"]
+  # Bootstrap: workloads (FluxCD controllers).
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "create", "patch"]
+  # Bootstrap: RBAC for FluxCD and operator components.
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["clusterroles", "clusterrolebindings", "roles", "rolebindings"]
+    verbs: ["get", "create", "patch", "bind", "escalate"]
+  # Bootstrap: CRDs for FluxCD and Module.
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    verbs: ["get", "create", "patch"]
+  # Bootstrap: NetworkPolicy (FluxCD hardening).
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["get", "create", "patch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

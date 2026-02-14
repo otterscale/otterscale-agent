@@ -152,3 +152,9 @@ func (c *Config) AgentServerURL() string {
 func (c *Config) AgentTunnelServerURL() string {
 	return c.v.GetString(keyAgentTunnelServerURL)
 }
+
+// AgentBootstrap returns whether the agent should run the Layer 0
+// bootstrap process on startup, installing FluxCD and the Module CRD.
+func (c *Config) AgentBootstrap() bool {
+	return c.v.GetBool(keyAgentBootstrap)
+}

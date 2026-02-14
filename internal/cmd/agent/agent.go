@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/otterscale/otterscale-agent/internal/bootstrap"
 	"github.com/otterscale/otterscale-agent/internal/core"
 	"github.com/otterscale/otterscale-agent/internal/pki"
 	"github.com/otterscale/otterscale-agent/internal/transport"
@@ -21,27 +22,37 @@ type Config struct {
 	Cluster         string
 	ServerURL       string
 	TunnelServerURL string
+	Bootstrap       bool
 }
 
 // Agent binds a local HTTP reverse-proxy to a dynamically allocated
 // port and exposes it to the control-plane via a chisel tunnel.
 type Agent struct {
-	handler *Handler
-	tunnel  core.TunnelConsumer
-	version core.Version
+	handler      *Handler
+	tunnel       core.TunnelConsumer
+	version      core.Version
+	bootstrapper *bootstrap.Bootstrapper
 }
 
-// NewAgent returns an Agent wired to the given handler and tunnel
-// consumer. version is injected via DI and used for version-mismatch
-// detection during registration.
-func NewAgent(handler *Handler, tunnel core.TunnelConsumer, version core.Version) *Agent {
-	return &Agent{handler: handler, tunnel: tunnel, version: version}
+// NewAgent returns an Agent wired to the given handler, tunnel
+// consumer, and bootstrapper. version is injected via DI and used for
+// version-mismatch detection during registration.
+func NewAgent(handler *Handler, tunnel core.TunnelConsumer, version core.Version, bootstrapper *bootstrap.Bootstrapper) *Agent {
+	return &Agent{handler: handler, tunnel: tunnel, version: version, bootstrapper: bootstrapper}
 }
 
-// Run starts the agent. It creates an in-memory pipe listener for the
-// HTTP server, a TCP bridge for chisel to forward to, and a tunnel
-// client, then blocks until ctx is cancelled.
+// Run starts the agent. When bootstrap is enabled, it first applies
+// embedded infrastructure manifests (FluxCD, Module CRD) to the local
+// cluster. It then creates an in-memory pipe listener for the HTTP
+// server, a TCP bridge for chisel to forward to, and a tunnel client,
+// then blocks until ctx is cancelled.
 func (a *Agent) Run(ctx context.Context, cfg Config) error {
+	if cfg.Bootstrap {
+		if err := a.bootstrapper.Run(ctx); err != nil {
+			return fmt.Errorf("bootstrap: %w", err)
+		}
+	}
+
 	pl := pipe.NewListener()
 
 	bridge, err := tunnel.NewBridge(pl)

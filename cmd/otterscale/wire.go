@@ -5,6 +5,7 @@ package main
 import (
 	"github.com/google/wire"
 	"github.com/otterscale/otterscale-agent/internal/app"
+	"github.com/otterscale/otterscale-agent/internal/bootstrap"
 	"github.com/otterscale/otterscale-agent/internal/cmd"
 	"github.com/otterscale/otterscale-agent/internal/cmd/agent"
 	"github.com/otterscale/otterscale-agent/internal/cmd/server"
@@ -28,9 +29,9 @@ func wireServer(v core.Version, conf *config.Config) (*server.Server, func(), er
 	panic(wire.Build(cmd.ProviderSet, app.ProviderSet, core.ProviderSet, providers.ProviderSet, provideCA, provideAgentManifestConfig))
 }
 
-// wireAgent assembles a fully wired Agent with its handler and fleet
-// registrar. The version parameter is provided by the caller and flows
-// through Wire to both FleetRegistrar and Agent.
+// wireAgent assembles a fully wired Agent with its handler, fleet
+// registrar, and bootstrapper. The version parameter is provided by
+// the caller and flows through Wire to both FleetRegistrar and Agent.
 func wireAgent(v core.Version) (*agent.Agent, func(), error) {
-	panic(wire.Build(cmd.ProviderSet, providers.ProviderSet))
+	panic(wire.Build(cmd.ProviderSet, providers.ProviderSet, bootstrap.ProviderSet, provideInClusterConfig))
 }
