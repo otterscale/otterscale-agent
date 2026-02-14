@@ -1,4 +1,8 @@
-package core
+// Package cache provides TTL-based caching infrastructure for
+// Kubernetes discovery data. It lives in the providers layer because
+// caching is an infrastructure concern — the domain layer
+// (internal/core) only defines the SchemaResolver interface.
+package cache
 
 import (
 	"context"
@@ -10,19 +14,21 @@ import (
 	"golang.org/x/sync/singleflight"
 	"k8s.io/apimachinery/pkg/version"
 	"k8s.io/kube-openapi/pkg/validation/spec"
+
+	"github.com/otterscale/otterscale-agent/internal/core"
 )
 
-// DiscoveryCacheTTL is the default TTL for cached OpenAPI schemas and
+// DefaultTTL is the default TTL for cached OpenAPI schemas and
 // server versions. Exported so that the DI layer can use it when
 // constructing a DiscoveryCache.
-const DiscoveryCacheTTL = 10 * time.Minute
+const DefaultTTL = 10 * time.Minute
 
 // DiscoveryCache provides TTL-based caching with singleflight
 // deduplication for OpenAPI schemas and Kubernetes server versions.
-// It implements SchemaResolver and reduces redundant discovery API
-// calls when multiple concurrent requests target the same cluster.
+// It implements core.SchemaResolver and reduces redundant discovery
+// API calls when multiple concurrent requests target the same cluster.
 type DiscoveryCache struct {
-	discovery DiscoveryClient
+	discovery core.DiscoveryClient
 	ttl       time.Duration
 
 	mu             sync.RWMutex
@@ -51,7 +57,7 @@ const singleflightFetchTimeout = 30 * time.Second
 
 // NewDiscoveryCache returns a DiscoveryCache that wraps the given
 // DiscoveryClient and caches results for the specified TTL.
-func NewDiscoveryCache(discovery DiscoveryClient, ttl time.Duration) *DiscoveryCache {
+func NewDiscoveryCache(discovery core.DiscoveryClient, ttl time.Duration) *DiscoveryCache {
 	return &DiscoveryCache{
 		discovery:    discovery,
 		ttl:          ttl,
@@ -90,7 +96,6 @@ func (c *DiscoveryCache) ResolveSchema(
 		}
 
 		c.mu.Lock()
-		c.evictExpired()
 		c.schemaCache[key] = &schemaCacheEntry{
 			schema:    resolved,
 			expiresAt: time.Now().Add(c.ttl),
@@ -128,7 +133,6 @@ func (c *DiscoveryCache) ServerVersion(ctx context.Context, cluster string) (*ve
 		}
 
 		c.mu.Lock()
-		c.evictExpired()
 		c.versionCache[cluster] = &versionCacheEntry{
 			version:   info,
 			expiresAt: time.Now().Add(c.ttl),

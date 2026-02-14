@@ -98,12 +98,14 @@ type RuntimeUseCase struct {
 }
 
 // NewRuntimeUseCase returns a RuntimeUseCase wired to the given
-// discovery and runtime backends.
-func NewRuntimeUseCase(discovery DiscoveryClient, runtime RuntimeRepo) *RuntimeUseCase {
+// discovery, runtime, and session store backends. The SessionStore is
+// injected rather than created internally so that callers can supply
+// alternative implementations for testing or monitoring.
+func NewRuntimeUseCase(discovery DiscoveryClient, runtime RuntimeRepo, sessions *SessionStore) *RuntimeUseCase {
 	return &RuntimeUseCase{
 		discovery: discovery,
 		runtime:   runtime,
-		sessions:  NewSessionStore(),
+		sessions:  sessions,
 	}
 }
 

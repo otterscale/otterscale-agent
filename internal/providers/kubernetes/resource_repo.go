@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -227,9 +228,17 @@ func (w *watcherAdapter) Stop() {
 
 // relay reads from the Kubernetes watch channel and converts events
 // to domain WatchEvents. It closes the output channel when the
-// upstream channel is closed.
+// upstream channel is closed. A panic recovery is installed to
+// prevent a malformed event from crashing the goroutine silently —
+// the output channel is still closed via defer so the caller sees
+// "watch closed" instead of hanging indefinitely.
 func (w *watcherAdapter) relay() {
 	defer close(w.ch)
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("watch relay panic recovered", "panic", r)
+		}
+	}()
 
 	for event := range w.inner.ResultChan() {
 		domainEvent := core.WatchEvent{

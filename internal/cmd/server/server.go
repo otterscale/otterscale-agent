@@ -11,6 +11,7 @@ import (
 	fleetv1 "github.com/otterscale/otterscale-agent/api/fleet/v1/pbconnect"
 	"github.com/otterscale/otterscale-agent/internal/core"
 	"github.com/otterscale/otterscale-agent/internal/middleware"
+	"github.com/otterscale/otterscale-agent/internal/providers/cache"
 	"github.com/otterscale/otterscale-agent/internal/transport"
 	"github.com/otterscale/otterscale-agent/internal/transport/http"
 )
@@ -38,14 +39,14 @@ type Server struct {
 	handler        *Handler
 	tunnel         transport.TunnelService
 	runtime        *core.RuntimeUseCase
-	discoveryCache *core.DiscoveryCache
+	discoveryCache *cache.DiscoveryCache
 }
 
 // NewServer returns a Server wired to the given handler and tunnel
 // service. The TunnelService interface decouples the server from
 // concrete tunnel implementations, keeping infrastructure details
 // behind the interface boundary.
-func NewServer(handler *Handler, tunnel transport.TunnelService, runtime *core.RuntimeUseCase, discoveryCache *core.DiscoveryCache) *Server {
+func NewServer(handler *Handler, tunnel transport.TunnelService, runtime *core.RuntimeUseCase, discoveryCache *cache.DiscoveryCache) *Server {
 	return &Server{handler: handler, tunnel: tunnel, runtime: runtime, discoveryCache: discoveryCache}
 }
 
@@ -131,7 +132,7 @@ func (l *sessionReaperListener) Stop(_ context.Context) error {
 // the transport.Listener interface so it participates in the managed
 // lifecycle alongside other servers.
 type cacheEvictorListener struct {
-	cache *core.DiscoveryCache
+	cache *cache.DiscoveryCache
 }
 
 func (l *cacheEvictorListener) Start(ctx context.Context) error {

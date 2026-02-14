@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 
 	"connectrpc.com/connect"
@@ -109,7 +110,7 @@ func (s *ResourceService) List(ctx context.Context, req *pb.ListRequest) (*pb.Li
 	// before serialising to protobuf. This is a presentation concern
 	// that belongs in the handler layer, not the domain use-case.
 	for i := range resources.Items {
-		cleanObject(&resources.Items[i])
+		cleanObject(resources.Items[i].Object)
 	}
 
 	pbResources, err := toProtoResources(resources.Items)
@@ -289,8 +290,9 @@ func (s *ResourceService) Watch(ctx context.Context, req *pb.WatchRequest, strea
 				return connect.NewError(connect.CodeUnavailable, errors.New("watch closed"))
 			}
 
-			msg, ok := processEvent(event)
-			if !ok {
+			msg, err := processEvent(event)
+			if err != nil {
+				slog.Warn("watch: skipping event", "error", err)
 				continue
 			}
 
@@ -306,25 +308,25 @@ func (s *ResourceService) Watch(ctx context.Context, req *pb.WatchRequest, strea
 // ---------------------------------------------------------------------------
 
 // processEvent converts a domain core.WatchEvent into a protobuf
-// WatchEvent. Returns false if the event should be skipped.
-func processEvent(event core.WatchEvent) (*pb.WatchEvent, bool) {
+// WatchEvent. Returns an error if the event should be skipped; the
+// caller is responsible for logging. This keeps the function free of
+// side effects so it can be unit-tested without producing log output.
+func processEvent(event core.WatchEvent) (*pb.WatchEvent, error) {
 	switch event.Type {
 	case core.WatchEventAdded, core.WatchEventModified, core.WatchEventDeleted:
 		if event.Object == nil {
-			slog.Warn("watch: nil object", "eventType", event.Type)
-			return nil, false
+			return nil, fmt.Errorf("nil object for event type %s", event.Type)
 		}
 
 		resource, err := toProtoResource(event.Object)
 		if err != nil {
-			slog.Warn("watch: failed to convert resource to proto", "eventType", event.Type, "error", err)
-			return nil, false
+			return nil, fmt.Errorf("convert resource for event type %s: %w", event.Type, err)
 		}
 
 		ret := &pb.WatchEvent{}
 		ret.SetType(toProtoWatchEventType(event.Type))
 		ret.SetResource(resource)
-		return ret, true
+		return ret, nil
 
 	case core.WatchEventBookmark:
 		ret := &pb.WatchEvent{}
@@ -337,7 +339,7 @@ func processEvent(event core.WatchEvent) (*pb.WatchEvent, bool) {
 				}
 			}
 		}
-		return ret, true
+		return ret, nil
 
 	case core.WatchEventError:
 		ret := &pb.WatchEvent{}
@@ -347,11 +349,10 @@ func processEvent(event core.WatchEvent) (*pb.WatchEvent, bool) {
 				ret.SetResource(resource)
 			}
 		}
-		return ret, true
+		return ret, nil
 
 	default:
-		slog.Warn("watch: unknown event type", "eventType", event.Type)
-		return nil, false
+		return nil, fmt.Errorf("unknown event type: %s", event.Type)
 	}
 }
 

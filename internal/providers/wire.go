@@ -1,17 +1,25 @@
 // Package providers aggregates all infrastructure-layer implementations
-// (chisel, kubernetes, otterscale) into a single Wire provider set.
+// (chisel, kubernetes, otterscale, cache) into a single Wire provider set.
 package providers
 
 import (
 	"github.com/google/wire"
 
 	"github.com/otterscale/otterscale-agent/internal/core"
-	"github.com/otterscale/otterscale-agent/internal/transport"
+	"github.com/otterscale/otterscale-agent/internal/providers/cache"
 	"github.com/otterscale/otterscale-agent/internal/providers/chisel"
 	"github.com/otterscale/otterscale-agent/internal/providers/kubernetes"
 	"github.com/otterscale/otterscale-agent/internal/providers/manifest"
 	"github.com/otterscale/otterscale-agent/internal/providers/otterscale"
+	"github.com/otterscale/otterscale-agent/internal/transport"
 )
+
+// provideDiscoveryCache constructs a DiscoveryCache with the default TTL.
+// This bridges the core.DiscoveryClient to the core.SchemaResolver
+// interface via caching.
+func provideDiscoveryCache(discovery core.DiscoveryClient) *cache.DiscoveryCache {
+	return cache.NewDiscoveryCache(discovery, cache.DefaultTTL)
+}
 
 // ProviderSet is the Wire provider set for all external adapters.
 var ProviderSet = wire.NewSet(
@@ -25,4 +33,6 @@ var ProviderSet = wire.NewSet(
 	kubernetes.NewResourceRepo,
 	kubernetes.NewRuntimeRepo,
 	otterscale.NewFleetRegistrar,
+	provideDiscoveryCache,
+	wire.Bind(new(core.SchemaResolver), new(*cache.DiscoveryCache)),
 )

@@ -7,12 +7,13 @@
 package main
 
 import (
-	"github.com/otterscale/otterscale-agent/internal/handler"
 	"github.com/otterscale/otterscale-agent/internal/bootstrap"
 	"github.com/otterscale/otterscale-agent/internal/cmd/agent"
 	"github.com/otterscale/otterscale-agent/internal/cmd/server"
 	"github.com/otterscale/otterscale-agent/internal/config"
 	"github.com/otterscale/otterscale-agent/internal/core"
+	"github.com/otterscale/otterscale-agent/internal/handler"
+	"github.com/otterscale/otterscale-agent/internal/providers/cache"
 	"github.com/otterscale/otterscale-agent/internal/providers/chisel"
 	"github.com/otterscale/otterscale-agent/internal/providers/kubernetes"
 	"github.com/otterscale/otterscale-agent/internal/providers/manifest"
@@ -59,12 +60,13 @@ func wireServer(v core.Version, conf *config.Config) (*server.Server, func(), er
 	fleetService := handler.NewFleetService(fleetUseCase)
 	kubernetesKubernetes := kubernetes.New(service)
 	discoveryClient := kubernetes.NewDiscoveryClient(kubernetesKubernetes)
-	discoveryCache := core.NewDiscoveryCache(discoveryClient, core.DiscoveryCacheTTL)
+	discoveryCache := cache.NewDiscoveryCache(discoveryClient, cache.DefaultTTL)
 	resourceRepo := kubernetes.NewResourceRepo(kubernetesKubernetes)
 	resourceUseCase := core.NewResourceUseCase(discoveryClient, resourceRepo, discoveryCache)
 	resourceService := handler.NewResourceService(resourceUseCase)
 	runtimeRepo := kubernetes.NewRuntimeRepo(kubernetesKubernetes)
-	runtimeUseCase := core.NewRuntimeUseCase(discoveryClient, runtimeRepo)
+	sessionStore := core.NewSessionStore()
+	runtimeUseCase := core.NewRuntimeUseCase(discoveryClient, runtimeRepo, sessionStore)
 	runtimeService := handler.NewRuntimeService(runtimeUseCase)
 	handler := server.NewHandler(fleetService, resourceService, runtimeService)
 	serverServer := server.NewServer(handler, service, runtimeUseCase, discoveryCache)

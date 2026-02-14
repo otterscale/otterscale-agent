@@ -275,20 +275,37 @@ func (uc *FleetUseCase) verifyManifestTokenInternal(token string) (cluster, user
 		return "", "", fmt.Errorf("parse token claims: %w", err)
 	}
 
-	if time.Now().Unix() > claims.Exp {
+	now := time.Now().Unix()
+
+	if now > claims.Exp {
 		return "", "", fmt.Errorf("token expired")
+	}
+
+	// Sanity-check iat: reject tokens that claim to be issued in
+	// the future (clock skew allowance: 5 minutes) or that are
+	// older than the maximum token TTL plus a small buffer. This
+	// limits the replay window for leaked tokens.
+	const clockSkew = 5 * 60 // 5 minutes in seconds
+	maxAge := int64(manifestTokenTTL.Seconds()) + clockSkew
+	if claims.Iat > now+clockSkew {
+		return "", "", fmt.Errorf("token issued in the future")
+	}
+	if now-claims.Iat > maxAge {
+		return "", "", fmt.Errorf("token too old")
 	}
 
 	return claims.Cluster, claims.Sub, nil
 }
 
 // issueManifestToken creates a signed token containing the user
-// identity, cluster name, and expiry timestamp.
+// identity, cluster name, issued-at, and expiry timestamps.
 func (uc *FleetUseCase) issueManifestToken(cluster, userName string) (string, error) {
+	now := time.Now()
 	claims := manifestTokenClaims{
 		Sub:     userName,
 		Cluster: cluster,
-		Exp:     time.Now().Add(manifestTokenTTL).Unix(),
+		Iat:     now.Unix(),
+		Exp:     now.Add(manifestTokenTTL).Unix(),
 	}
 
 	payload, err := json.Marshal(claims)
@@ -308,6 +325,7 @@ func (uc *FleetUseCase) issueManifestToken(cluster, userName string) (string, er
 type manifestTokenClaims struct {
 	Sub     string `json:"sub"`
 	Cluster string `json:"cluster"`
+	Iat     int64  `json:"iat"`
 	Exp     int64  `json:"exp"`
 }
 

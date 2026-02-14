@@ -1,5 +1,23 @@
 package core
 
+// ADR: Kubernetes types in the domain layer
+//
+// This file imports several k8s.io packages (apimachinery, kube-openapi)
+// directly into the core (domain) layer. In a strict DDD interpretation,
+// domain types should be infrastructure-agnostic. However, otterscale's
+// core business *is* Kubernetes resource management: GVR, Unstructured,
+// APIResourceList, and OpenAPI Schema are part of the domain's Ubiquitous
+// Language, not incidental infrastructure details.
+//
+// Wrapping these types in custom DTOs would introduce a costly
+// translation layer at every boundary with no material benefit — the
+// domain would still be structurally identical to the K8s types.
+//
+// Trade-off accepted: we allow k8s.io/apimachinery and kube-openapi
+// imports in core, treating them as domain-level vocabulary rather than
+// infrastructure leakage. This decision should be revisited if the
+// project ever needs to support non-Kubernetes backends.
+
 import (
 	"context"
 	"fmt"
